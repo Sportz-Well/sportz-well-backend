@@ -1,44 +1,43 @@
-const express = require("express");
-const cors = require("cors");
 require("dotenv").config();
 
-const app = express();
+const express = require("express");
+const cors = require("cors");
 
-
-// ===== CORS CONFIGURATION =====
-
-app.use(cors({
-    origin: "*",
-    methods: ["GET","POST","PUT","DELETE"],
-    allowedHeaders: ["Content-Type","Authorization"]
-}));
-
-
-app.use(express.json());
-
-
-// ===== ROUTES =====
+const setupDatabase = require("./setupDatabase");
+const createAdmin = require("./createAdmin");
 
 const authRoutes = require("./routes/authRoutes");
 const playerRoutes = require("./routes/playerRoutes");
 const assessmentRoutes = require("./routes/assessmentRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
 
 app.use("/api", authRoutes);
 app.use("/api", playerRoutes);
 app.use("/api", assessmentRoutes);
-
-
-// ===== TEST ROUTE =====
-
-app.get("/", (req,res)=>{
-    res.send("Sportz-Well Backend Running");
-});
-
-
-// ===== START SERVER =====
+app.use("/api", dashboardRoutes);
 
 const PORT = process.env.PORT || 10000;
 
-app.listen(PORT, ()=>{
-    console.log("Sportz-Well API running on port", PORT);
-});
+async function startServer() {
+  try {
+    console.log("Setting up database...");
+    await setupDatabase();
+
+    console.log("Creating admin user...");
+    await createAdmin();
+
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+
+  } catch (error) {
+    console.error("Startup error:", error);
+  }
+}
+
+startServer();
