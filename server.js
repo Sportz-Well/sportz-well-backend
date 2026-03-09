@@ -1,8 +1,3 @@
-// ===============================
-// Sportz-Well Backend Server
-// Production Version
-// ===============================
-
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
@@ -10,18 +5,19 @@ require("dotenv").config();
 const app = express();
 
 
-// ===============================
-// MIDDLEWARE
-// ===============================
+// ===== CORS CONFIGURATION =====
 
-app.use(cors());
+app.use(cors({
+    origin: "*",
+    methods: ["GET","POST","PUT","DELETE"],
+    allowedHeaders: ["Content-Type","Authorization"]
+}));
+
 
 app.use(express.json());
 
 
-// ===============================
-// ROUTES
-// ===============================
+// ===== ROUTES =====
 
 const authRoutes = require("./routes/authRoutes");
 const playerRoutes = require("./routes/playerRoutes");
@@ -32,25 +28,17 @@ app.use("/api", playerRoutes);
 app.use("/api", assessmentRoutes);
 
 
-// ===============================
-// HEALTH CHECK
-// ===============================
+// ===== TEST ROUTE =====
 
-app.get("/", (req, res) => {
-
+app.get("/", (req,res)=>{
     res.send("Sportz-Well Backend Running");
-
 });
 
 
-// ===============================
-// SERVER START
-// ===============================
+// ===== START SERVER =====
 
 const PORT = process.env.PORT || 10000;
 
-app.listen(PORT, () => {
-
-    console.log(`Sportz-Well API running on port ${PORT}`);
-
+app.listen(PORT, ()=>{
+    console.log("Sportz-Well API running on port", PORT);
 });
