@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
@@ -226,6 +226,95 @@ app.post("/api/assessments",authenticate,async(req,res)=>{
 });
 
 /* ===============================
+   DASHBOARD METRICS
+================================ */
+
+app.get("/api/dashboard",authenticate,async(req,res)=>{
+
+  try{
+
+    const latestScoreResult = await pool.query(
+      `SELECT overall_score
+       FROM assessment_sessions
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`
+    );
+
+    const quarterGrowthResult = await pool.query(
+      `WITH quarter_averages AS (
+         SELECT date_trunc('quarter', created_at) AS quarter_start,
+                AVG(overall_score)::numeric AS avg_score
+         FROM assessment_sessions
+         GROUP BY 1
+       ), ranked AS (
+         SELECT quarter_start,
+                avg_score,
+                LAG(avg_score) OVER (ORDER BY quarter_start) AS prev_avg
+         FROM quarter_averages
+       )
+       SELECT avg_score, prev_avg
+       FROM ranked
+       ORDER BY quarter_start DESC
+       LIMIT 1`
+    );
+
+    const topImproverResult = await pool.query(
+      `SELECT user_id,
+              AVG(improvement_pct)::numeric AS avg_improvement
+       FROM assessment_sessions
+       WHERE user_id IS NOT NULL
+       GROUP BY user_id
+       ORDER BY avg_improvement DESC NULLS LAST
+       LIMIT 1`
+    );
+
+    const atRiskResult = await pool.query(
+      `WITH latest_per_user AS (
+         SELECT DISTINCT ON (user_id) user_id, overall_score
+         FROM assessment_sessions
+         WHERE user_id IS NOT NULL
+         ORDER BY user_id, created_at DESC, id DESC
+       )
+       SELECT COUNT(*)::int AS at_risk_count
+       FROM latest_per_user
+       WHERE overall_score < 60`
+    );
+
+    const avgImprovementResult = await pool.query(
+      `SELECT COALESCE(ROUND(AVG(improvement_pct)::numeric,2),0) AS avg_improvement
+       FROM assessment_sessions`
+    );
+
+    const latest_score = latestScoreResult.rows[0]?.overall_score ?? 0;
+
+    const currentQuarterAvg = quarterGrowthResult.rows[0]?.avg_score;
+    const previousQuarterAvg = quarterGrowthResult.rows[0]?.prev_avg;
+
+    const quarter_growth = (currentQuarterAvg !== null && currentQuarterAvg !== undefined && previousQuarterAvg !== null && previousQuarterAvg !== undefined)
+      ? Number((Number(currentQuarterAvg) - Number(previousQuarterAvg)).toFixed(2))
+      : 0;
+
+    const top_improver = topImproverResult.rows[0]?.user_id ?? null;
+    const at_risk_count = atRiskResult.rows[0]?.at_risk_count ?? 0;
+    const avg_improvement = Number(avgImprovementResult.rows[0]?.avg_improvement ?? 0);
+
+    res.json({
+      latest_score,
+      quarter_growth,
+      top_improver,
+      at_risk_count,
+      avg_improvement
+    });
+
+  }catch(err){
+
+    console.error(err);
+    res.status(500).json({error:"Dashboard metrics failed"});
+
+  }
+
+});
+/* ===============================
    START SERVER
 ================================ */
 
@@ -240,3 +329,4 @@ app.listen(PORT, async ()=>{
   await ensureAdmin();
 
 });
+
