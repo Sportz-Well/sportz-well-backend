@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const { Pool } = require("pg");
+const playerRoutes = require("./routes/playerRoutes");
 
 const app = express();
 
@@ -314,6 +315,8 @@ app.get("/api/dashboard",authenticate,async(req,res)=>{
   }
 
 });
+app.use("/api", playerRoutes);
+
 /* ===============================
    START SERVER
 ================================ */
@@ -329,4 +332,7 @@ app.listen(PORT, async ()=>{
   await ensureAdmin();
 
 });
+
+
+
 
