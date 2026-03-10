@@ -58,12 +58,11 @@ const playerId = req.params.id;
 
 const result = await pool.query(`
 SELECT
-p.id,
 p.name,
 p.gender,
 p.dob,
-a.overall_score AS latest_overall_score,
-a.improvement_pct AS latest_improvement_pct
+a.overall_score,
+a.improvement_pct
 FROM players p
 LEFT JOIN assessment_sessions a
 ON p.id = a.user_id
