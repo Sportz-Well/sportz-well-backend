@@ -1,4 +1,4 @@
-const express = require("express");
+﻿const express = require("express");
 const router = express.Router();
 
 const pool = require("../db");
@@ -56,25 +56,27 @@ try{
 
 const playerId = req.params.id;
 
-const player = await pool.query(`
-SELECT id,name,age,role
-FROM players
-WHERE id=$1
+const result = await pool.query(`
+SELECT
+p.id,
+p.name,
+p.gender,
+p.dob,
+a.overall_score AS latest_overall_score,
+a.improvement_pct AS latest_improvement_pct
+FROM players p
+LEFT JOIN assessment_sessions a
+ON p.id = a.user_id
+WHERE p.id = $1
+ORDER BY a.created_at DESC
+LIMIT 1
 `,[playerId]);
 
-const trend = await pool.query(`
-SELECT quarterly_cycle AS quarter,
-overall_score AS score
-FROM assessment_sessions
-WHERE user_id=$1
-ORDER BY quarterly_cycle
-`,[playerId]);
+if(result.rows.length===0){
+return res.status(404).json({error:"Player not found"});
+}
 
-res.json({
-age:player.rows[0].age,
-role:player.rows[0].role,
-trend:trend.rows
-});
+res.json(result.rows[0]);
 
 }catch(err){
 
