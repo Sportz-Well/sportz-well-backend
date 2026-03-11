@@ -178,7 +178,7 @@ app.get("/api/players",authenticate,async(req,res)=>{
        SELECT overall_score, improvement_pct
        FROM assessment_sessions
        WHERE user_id = p.id
-       ORDER BY test_date DESC
+       ORDER BY created_at DESC
        LIMIT 1
      ) a ON true
      ORDER BY p.name`
@@ -347,6 +347,7 @@ app.listen(PORT, async ()=>{
   await ensureAdmin();
 
 });
+
 
 
 
