@@ -56,22 +56,71 @@ try{
 
 const playerId = req.params.id;
 
+const assessmentColsResult = await pool.query(`
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'assessment_sessions'
+`);
+
+const playerColsResult = await pool.query(`
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'players'
+`);
+
+const assessmentCols = new Set(assessmentColsResult.rows.map((r)=>r.column_name));
+const playerCols = new Set(playerColsResult.rows.map((r)=>r.column_name));
+
+const joinColumn = assessmentCols.has("user_id")
+? "user_id"
+: (assessmentCols.has("player_id") ? "player_id" : null);
+
+const orderColumn = ["created_at","assessment_date","recorded_at","date","test_date"]
+.find((col)=>assessmentCols.has(col)) || null;
+
+const overallColumn = assessmentCols.has("overall_score")
+? "overall_score"
+: (assessmentCols.has("latest_score") ? "latest_score" : null);
+
+const improvementColumn = assessmentCols.has("improvement_pct")
+? "improvement_pct"
+: (assessmentCols.has("improvement_percent")
+? "improvement_percent"
+: (assessmentCols.has("improvement_percentage") ? "improvement_percentage" : null));
+
+const dobSelect = playerCols.has("dob")
+? "p.dob"
+: (playerCols.has("date_of_birth") ? "p.date_of_birth AS dob" : "NULL::date AS dob");
+
+const genderSelect = playerCols.has("gender") ? "p.gender" : "NULL::text AS gender";
+const roleSelect = playerCols.has("role") ? "p.role" : "NULL::text AS role";
+
+const assessmentSubquery = joinColumn ? `
+SELECT
+${overallColumn ? `${overallColumn} AS overall_score` : "NULL::numeric AS overall_score"},
+${improvementColumn ? `${improvementColumn} AS improvement_pct` : "NULL::numeric AS improvement_pct"}
+FROM assessment_sessions
+WHERE ${joinColumn} = p.id
+${orderColumn ? `ORDER BY ${orderColumn} DESC` : ""}
+LIMIT 1
+` : `
+SELECT
+NULL::numeric AS overall_score,
+NULL::numeric AS improvement_pct
+`;
+
 const result = await pool.query(`
 SELECT
 p.id,
 p.name,
-p.dob,
-p.gender,
-p.role,
+${dobSelect},
+${genderSelect},
+${roleSelect},
 a.overall_score,
 a.improvement_pct
 FROM players p
 LEFT JOIN LATERAL (
-SELECT overall_score, improvement_pct
-FROM assessment_sessions
-WHERE user_id = p.id
-ORDER BY created_at DESC
-LIMIT 1
+${assessmentSubquery}
 ) a ON true
 WHERE p.id = $1
 `,[playerId]);
