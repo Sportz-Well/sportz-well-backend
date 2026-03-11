@@ -166,7 +166,22 @@ function authenticate(req,res,next){
 app.get("/api/players",authenticate,async(req,res)=>{
 
   const result=await pool.query(
-    "SELECT * FROM players ORDER BY id DESC"
+    `SELECT
+       p.id,
+       p.name,
+       p.dob,
+       p.role,
+       a.overall_score,
+       a.improvement_pct
+     FROM players p
+     LEFT JOIN LATERAL (
+       SELECT overall_score, improvement_pct
+       FROM assessment_sessions
+       WHERE user_id = p.id
+       ORDER BY test_date DESC
+       LIMIT 1
+     ) a ON true
+     ORDER BY p.name`
   );
 
   res.json(result.rows);
@@ -332,6 +347,7 @@ app.listen(PORT, async ()=>{
   await ensureAdmin();
 
 });
+
 
 
 
