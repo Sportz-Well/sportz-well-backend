@@ -100,6 +100,107 @@ async function ensureAdmin() {
 }
 
 /* ===============================
+   SEED DEMO DATA (RUN ONCE)
+================================ */
+
+async function seedCoachDemoDataOnce() {
+
+  const seedKey = "coach_demo_seed_v1";
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_flags (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  const existingSeed = await pool.query(
+    `SELECT value FROM app_flags WHERE key = $1`,
+    [seedKey]
+  );
+
+  if(existingSeed.rows.length > 0){
+    console.log("Coach demo seed already applied");
+    return;
+  }
+
+  const client = await pool.connect();
+
+  try{
+
+    await client.query("BEGIN");
+
+    await client.query("DELETE FROM assessment_sessions");
+    await client.query("DELETE FROM players");
+
+    const playersResult = await client.query(`
+      INSERT INTO players(name,dob,gender,role) VALUES
+      ('Aarav Jagdale','2008-06-17','Male','Batsman'),
+      ('Vedant Kulkarni','2009-03-12','Male','Bowler'),
+      ('Rohan Patil','2008-11-02','Male','All-Rounder'),
+      ('Aryan Deshmukh','2009-01-21','Male','Wicketkeeper'),
+      ('Sarthak More','2008-07-09','Male','Bowler'),
+      ('Mihir Jadhav','2009-05-18','Male','Batsman')
+      RETURNING id
+    `);
+
+    const scoreRows = [
+      { overall: 87, improvement: 6 },
+      { overall: 81, improvement: 4 },
+      { overall: 74, improvement: 3 },
+      { overall: 69, improvement: 2 },
+      { overall: 41, improvement: -4 },
+      { overall: 36, improvement: -6 }
+    ];
+
+    for(let i=0; i<playersResult.rows.length; i++){
+
+      const playerId = playersResult.rows[i].id;
+      const score = scoreRows[i];
+      const createdAt = new Date(Date.now() - (scoreRows.length - i) * 60000);
+
+      await client.query(
+        `INSERT INTO assessment_sessions
+         (user_id,physical_score,mental_score,skill_score,overall_score,improvement_pct,created_at)
+         VALUES($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          playerId,
+          score.overall,
+          score.overall,
+          score.overall,
+          score.overall,
+          score.improvement,
+          createdAt
+        ]
+      );
+
+    }
+
+    await client.query(
+      `INSERT INTO app_flags(key,value)
+       VALUES($1,$2)`,
+      [seedKey,"done"]
+    );
+
+    await client.query("COMMIT");
+
+    console.log("Coach demo seed applied");
+
+  }catch(err){
+
+    await client.query("ROLLBACK");
+    throw err;
+
+  }finally{
+
+    client.release();
+
+  }
+
+}
+
+/* ===============================
    LOGIN
 ================================ */
 
@@ -180,79 +281,33 @@ app.get("/api/players",authenticate,async(req,res)=>{
 
   try{
 
-    const assessmentColsResult = await pool.query(
-      `SELECT column_name
-       FROM information_schema.columns
-       WHERE table_name = 'assessment_sessions'`
-    );
-
-    const playerColsResult = await pool.query(
-      `SELECT column_name
-       FROM information_schema.columns
-       WHERE table_name = 'players'`
-    );
-
-    const assessmentCols = new Set(assessmentColsResult.rows.map(r=>r.column_name));
-    const playerCols = new Set(playerColsResult.rows.map(r=>r.column_name));
-
-    const joinColumn = assessmentCols.has("user_id")
-      ? "user_id"
-      : (assessmentCols.has("player_id") ? "player_id" : null);
-
-    const orderColumn = assessmentCols.has("created_at")
-      ? "created_at"
-      : (assessmentCols.has("assessment_date")
-      ? "assessment_date"
-      : (assessmentCols.has("recorded_at")
-      ? "recorded_at"
-      : (assessmentCols.has("date")
-      ? "date"
-      : (assessmentCols.has("test_date") ? "test_date" : null))));
-
-    if(!joinColumn){
-      console.error("GET /api/players schema error: missing user_id/player_id in assessment_sessions");
-      return res.status(500).json({error:"Assessment schema mismatch"});
-    }
-
-    const roleSelect = playerCols.has("role") ? "p.role" : "NULL::text AS role";
-    const dobSelect = playerCols.has("dob") ? "p.dob" : "NULL::date AS dob";
-
-    const overallSelect = assessmentCols.has("overall_score")
-      ? "overall_score"
-      : "NULL::integer AS overall_score";
-
-    const improvementSelect = assessmentCols.has("improvement_pct")
-      ? "improvement_pct"
-      : "NULL::integer AS improvement_pct";
-
-    const orderClause = orderColumn ? `ORDER BY ${orderColumn} DESC` : "";
-
-    const sql = `
+    const query = `
       SELECT
       p.id,
       p.name,
-      ${dobSelect},
-      ${roleSelect},
+      p.dob,
+      p.role,
       a.overall_score,
       a.improvement_pct
       FROM players p
       LEFT JOIN LATERAL (
-         SELECT ${overallSelect}, ${improvementSelect}
+         SELECT overall_score, improvement_pct
          FROM assessment_sessions
-         WHERE ${joinColumn} = p.id
-         ${orderClause}
+         WHERE user_id = p.id
+         ORDER BY created_at DESC
          LIMIT 1
       ) a ON true
-      ORDER BY p.name`;
+      ORDER BY p.name;
+    `;
 
-    const result = await pool.query(sql);
+    const result = await pool.query(query);
 
     res.json(result.rows);
 
   }catch(err){
 
-    console.error("GET /api/players error:", err);
-    res.status(500).json({error:"Failed to fetch players"});
+    console.error("Players query failed:", err);
+    res.status(500).json({error:"Server error while loading players"});
 
   }
 
@@ -266,40 +321,13 @@ app.post("/api/players",authenticate,async(req,res)=>{
 
   try{
 
-    const {name,gender,dob,role}=req.body;
-
-    const colsResult = await pool.query(
-      `SELECT column_name
-       FROM information_schema.columns
-       WHERE table_name = 'players'`
-    );
-
-    const cols = new Set(colsResult.rows.map((r)=>r.column_name));
-    const insertCols = ["name"];
-    const values = [name];
-
-    if(cols.has("gender")){
-      insertCols.push("gender");
-      values.push(gender ?? null);
-    }
-
-    if(cols.has("dob")){
-      insertCols.push("dob");
-      values.push(dob ?? null);
-    }
-
-    if(cols.has("role")){
-      insertCols.push("role");
-      values.push(role ?? null);
-    }
-
-    const placeholders = insertCols.map((_,idx)=>`$${idx+1}`).join(",");
+    const {name,dob,gender,role}=req.body;
 
     const result=await pool.query(
-      `INSERT INTO players(${insertCols.join(",")})
-       VALUES(${placeholders})
+      `INSERT INTO players(name,dob,gender,role)
+       VALUES($1,$2,$3,$4)
        RETURNING *`,
-      values
+      [name,dob,gender,role]
     );
 
     res.json(result.rows[0]);
@@ -451,6 +479,8 @@ app.listen(PORT, async ()=>{
   await setupDatabase();
 
   await ensureAdmin();
+
+  await seedCoachDemoDataOnce();
 
 });
 
