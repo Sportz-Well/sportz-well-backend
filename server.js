@@ -251,16 +251,52 @@ app.get("/api/players",authenticate,async(req,res)=>{
 
 app.post("/api/players",authenticate,async(req,res)=>{
 
-  const {name,gender,dob}=req.body;
+  try{
 
-  const result=await pool.query(
-    `INSERT INTO players(name,gender,dob)
-     VALUES($1,$2,$3)
-     RETURNING *`,
-    [name,gender,dob]
-  );
+    const {name,gender,dob,role}=req.body;
 
-  res.json(result.rows[0]);
+    const colsResult = await pool.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_name = 'players'`
+    );
+
+    const cols = new Set(colsResult.rows.map((r)=>r.column_name));
+    const insertCols = ["name"];
+    const values = [name];
+
+    if(cols.has("gender")){
+      insertCols.push("gender");
+      values.push(gender ?? null);
+    }
+
+    if(cols.has("dob")){
+      insertCols.push("dob");
+      values.push(dob ?? null);
+    }
+
+    if(cols.has("role")){
+      insertCols.push("role");
+      values.push(role ?? null);
+    }
+
+    const placeholders = insertCols.map((_,idx)=>`$${idx+1}`).join(",");
+
+    const result=await pool.query(
+      `INSERT INTO players(${insertCols.join(",")})
+       VALUES(${placeholders})
+       RETURNING *`,
+      values
+    );
+
+    res.json(result.rows[0]);
+
+  }catch(err){
+
+    console.error("POST /api/players failed:", err);
+    res.status(500).json({error:"Failed to add player"});
+
+  }
 
 });
 
