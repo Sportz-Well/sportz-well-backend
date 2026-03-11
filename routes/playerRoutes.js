@@ -58,17 +58,22 @@ const playerId = req.params.id;
 
 const result = await pool.query(`
 SELECT
+p.id,
 p.name,
-p.gender,
 p.dob,
+p.gender,
+p.role,
 a.overall_score,
 a.improvement_pct
 FROM players p
-LEFT JOIN assessment_sessions a
-ON p.id = a.user_id
-WHERE p.id = $1
-ORDER BY a.created_at DESC
+LEFT JOIN LATERAL (
+SELECT overall_score, improvement_pct
+FROM assessment_sessions
+WHERE user_id = p.id
+ORDER BY created_at DESC
 LIMIT 1
+) a ON true
+WHERE p.id = $1
 `,[playerId]);
 
 if(result.rows.length===0){
@@ -79,8 +84,8 @@ res.json(result.rows[0]);
 
 }catch(err){
 
-console.error(err);
-res.status(500).json({error:"Player fetch failed"});
+console.error("GET /api/player/:id failed:", err);
+res.status(500).json({error:"Server error while loading player profile"});
 
 }
 
