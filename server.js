@@ -266,7 +266,15 @@ app.post("/api/login", async (req,res)=>{
 
     const user=result.rows[0];
 
-    if(password!==user.password){
+    let valid = false;
+
+    if(user.password && user.password.startsWith("$2")){
+      valid = await bcrypt.compare(password,user.password);
+    }else{
+      valid = password===user.password;
+    }
+
+    if(!valid){
       return res.status(401).json({error:"Invalid login credentials"});
     }
 
