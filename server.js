@@ -3,6 +3,7 @@
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
 const { Pool } = require("pg");
 const playerRoutes = require("./routes/playerRoutes");
 
@@ -96,6 +97,50 @@ async function ensureAdmin() {
     console.log("Admin already exists");
 
   }
+
+}
+
+/* ===============================
+   CREATE DEMO COACH USER
+================================ */
+
+async function ensureCoachDemoUser() {
+
+  const coachEmail = "coach@sportzwell.com";
+  const existing = await pool.query(
+    "SELECT id FROM users WHERE email=$1",
+    [coachEmail]
+  );
+
+  if(existing.rows.length > 0){
+    console.log("Coach demo user already exists");
+    return;
+  }
+
+  const hashedPassword = await bcrypt.hash("demo123",10);
+
+  const userColsResult = await pool.query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_name = 'users'`
+  );
+  const userCols = new Set(userColsResult.rows.map((r)=>r.column_name));
+
+  if(userCols.has("role")){
+    await pool.query(
+      `INSERT INTO users(email,password,role)
+       VALUES($1,$2,$3)`,
+      [coachEmail,hashedPassword,"coach"]
+    );
+  }else{
+    await pool.query(
+      `INSERT INTO users(email,password)
+       VALUES($1,$2)`,
+      [coachEmail,hashedPassword]
+    );
+  }
+
+  console.log("Coach demo user created");
 
 }
 
@@ -479,6 +524,7 @@ app.listen(PORT, async ()=>{
   await setupDatabase();
 
   await ensureAdmin();
+  await ensureCoachDemoUser();
 
   await seedCoachDemoDataOnce();
 
