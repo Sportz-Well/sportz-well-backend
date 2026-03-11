@@ -54,22 +54,63 @@ router.get("/player/:id", authMiddleware, async (req,res)=>{
 
 try {
 
+const playerColsResult = await pool.query(`
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'players'
+`);
+
+const assessmentColsResult = await pool.query(`
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'assessment_sessions'
+`);
+
+const playerCols = new Set(playerColsResult.rows.map((r)=>r.column_name));
+const assessmentCols = new Set(assessmentColsResult.rows.map((r)=>r.column_name));
+
+const dobSelect = playerCols.has("dob")
+? "p.dob"
+: (playerCols.has("date_of_birth") ? "p.date_of_birth AS dob" : "NULL::date AS dob");
+const genderSelect = playerCols.has("gender") ? "p.gender" : "NULL::text AS gender";
+const roleSelect = playerCols.has("role") ? "p.role" : "NULL::text AS role";
+
+const joinColumn = assessmentCols.has("user_id")
+? "user_id"
+: (assessmentCols.has("player_id") ? "player_id" : null);
+
+const orderColumn = ["created_at","assessment_date","recorded_at","date","test_date"]
+.find((col)=>assessmentCols.has(col)) || null;
+
+const overallSelect = assessmentCols.has("overall_score")
+? "overall_score"
+: "NULL::integer AS overall_score";
+const improvementSelect = assessmentCols.has("improvement_pct")
+? "improvement_pct"
+: "NULL::integer AS improvement_pct";
+
+const lateralQuery = joinColumn ? `
+SELECT ${overallSelect}, ${improvementSelect}
+FROM assessment_sessions
+WHERE ${joinColumn} = p.id
+${orderColumn ? `ORDER BY ${orderColumn} DESC` : ""}
+LIMIT 1
+` : `
+SELECT NULL::integer AS overall_score, NULL::integer AS improvement_pct
+`;
+
 const query = `
 SELECT
 p.id,
 p.name,
-p.dob,
-p.gender,
-p.role,
+${dobSelect},
+${genderSelect},
+${roleSelect},
 a.overall_score,
 a.improvement_pct
 FROM players p
 LEFT JOIN LATERAL (
-    SELECT overall_score, improvement_pct
-    FROM assessment_sessions
-    WHERE user_id = p.id
-    ORDER BY created_at DESC
-    LIMIT 1
+    ${lateralQuery}
 ) a ON true
 WHERE p.id = $1;
 `;

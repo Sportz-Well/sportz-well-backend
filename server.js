@@ -41,6 +41,11 @@ async function setupDatabase() {
   `);
 
   await pool.query(`
+    ALTER TABLE players
+    ADD COLUMN IF NOT EXISTS role TEXT
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS assessment_sessions (
       id SERIAL PRIMARY KEY,
       user_id INTEGER,
@@ -51,6 +56,14 @@ async function setupDatabase() {
       improvement_pct INTEGER,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE assessment_sessions
+    ADD COLUMN IF NOT EXISTS user_id INTEGER,
+    ADD COLUMN IF NOT EXISTS overall_score INTEGER,
+    ADD COLUMN IF NOT EXISTS improvement_pct INTEGER,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   `);
 
   console.log("Tables ready");
