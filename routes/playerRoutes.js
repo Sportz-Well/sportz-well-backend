@@ -130,6 +130,35 @@ res.status(500).json({error:"Server error loading player profile"});
 
 });
 
+/*
+GET PLAYER PROGRESS TREND
+*/
+router.get("/player/:id/progress", authMiddleware, async (req,res)=>{
+
+try{
+
+const result = await pool.query(`
+SELECT
+overall_score,
+improvement_pct,
+created_at
+FROM assessment_sessions
+WHERE user_id = $1
+ORDER BY created_at ASC
+LIMIT 8
+`, [req.params.id]);
+
+res.json(result.rows);
+
+}catch(err){
+
+console.error("Player progress query failed:", err);
+res.status(500).json({error:"Player progress fetch failed"});
+
+}
+
+});
+
 
 /*
 ADD PLAYER

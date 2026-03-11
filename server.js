@@ -148,7 +148,7 @@ async function ensureCoachDemoUser() {
    SEED DEMO DATA (RUN ONCE)
 ================================ */
 
-async function seedCoachDemoDataOnce() {
+async function seedCoachDemoDataOnce(forceReset = false) {
 
   const seedKey = "coach_demo_seed_v1";
 
@@ -165,7 +165,7 @@ async function seedCoachDemoDataOnce() {
     [seedKey]
   );
 
-  if(existingSeed.rows.length > 0){
+  if(!forceReset && existingSeed.rows.length > 0){
     console.log("Coach demo seed already applied");
     return;
   }
@@ -224,7 +224,10 @@ async function seedCoachDemoDataOnce() {
 
     await client.query(
       `INSERT INTO app_flags(key,value)
-       VALUES($1,$2)`,
+       VALUES($1,$2)
+       ON CONFLICT (key)
+       DO UPDATE SET value = EXCLUDED.value,
+                     updated_at = CURRENT_TIMESTAMP`,
       [seedKey,"done"]
     );
 
@@ -513,6 +516,27 @@ app.get("/api/dashboard",authenticate,async(req,res)=>{
 
     console.error(err);
     res.status(500).json({error:"Dashboard metrics failed"});
+
+  }
+
+});
+
+/* ===============================
+   RESET DEMO DATASET
+================================ */
+
+app.post("/api/reset-demo",authenticate,async(req,res)=>{
+
+  try{
+
+    await seedCoachDemoDataOnce(true);
+
+    res.json({message:"Demo dataset reset complete"});
+
+  }catch(err){
+
+    console.error("Reset demo failed:", err);
+    res.status(500).json({error:"Failed to reset demo dataset"});
 
   }
 
