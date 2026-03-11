@@ -165,26 +165,83 @@ function authenticate(req,res,next){
 
 app.get("/api/players",authenticate,async(req,res)=>{
 
-  const result=await pool.query(
-    `SELECT
-       p.id,
-       p.name,
-       p.dob,
-       p.role,
-       a.overall_score,
-       a.improvement_pct
-     FROM players p
-     LEFT JOIN LATERAL (
-       SELECT overall_score, improvement_pct
-       FROM assessment_sessions
-       WHERE user_id = p.id
-       ORDER BY created_at DESC
-       LIMIT 1
-     ) a ON true
-     ORDER BY p.name`
-  );
+  try{
 
-  res.json(result.rows);
+    const assessmentColsResult = await pool.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_name = 'assessment_sessions'`
+    );
+
+    const playerColsResult = await pool.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_name = 'players'`
+    );
+
+    const assessmentCols = new Set(assessmentColsResult.rows.map(r=>r.column_name));
+    const playerCols = new Set(playerColsResult.rows.map(r=>r.column_name));
+
+    const joinColumn = assessmentCols.has("user_id")
+      ? "user_id"
+      : (assessmentCols.has("player_id") ? "player_id" : null);
+
+    const orderColumn = assessmentCols.has("created_at")
+      ? "created_at"
+      : (assessmentCols.has("assessment_date")
+      ? "assessment_date"
+      : (assessmentCols.has("recorded_at")
+      ? "recorded_at"
+      : (assessmentCols.has("date")
+      ? "date"
+      : (assessmentCols.has("test_date") ? "test_date" : null))));
+
+    if(!joinColumn){
+      console.error("GET /api/players schema error: missing user_id/player_id in assessment_sessions");
+      return res.status(500).json({error:"Assessment schema mismatch"});
+    }
+
+    const roleSelect = playerCols.has("role") ? "p.role" : "NULL::text AS role";
+    const dobSelect = playerCols.has("dob") ? "p.dob" : "NULL::date AS dob";
+
+    const overallSelect = assessmentCols.has("overall_score")
+      ? "overall_score"
+      : "NULL::integer AS overall_score";
+
+    const improvementSelect = assessmentCols.has("improvement_pct")
+      ? "improvement_pct"
+      : "NULL::integer AS improvement_pct";
+
+    const orderClause = orderColumn ? `ORDER BY ${orderColumn} DESC` : "";
+
+    const sql = `
+      SELECT
+      p.id,
+      p.name,
+      ${dobSelect},
+      ${roleSelect},
+      a.overall_score,
+      a.improvement_pct
+      FROM players p
+      LEFT JOIN LATERAL (
+         SELECT ${overallSelect}, ${improvementSelect}
+         FROM assessment_sessions
+         WHERE ${joinColumn} = p.id
+         ${orderClause}
+         LIMIT 1
+      ) a ON true
+      ORDER BY p.name`;
+
+    const result = await pool.query(sql);
+
+    res.json(result.rows);
+
+  }catch(err){
+
+    console.error("GET /api/players error:", err);
+    res.status(500).json({error:"Failed to fetch players"});
+
+  }
 
 });
 
@@ -347,6 +404,7 @@ app.listen(PORT, async ()=>{
   await ensureAdmin();
 
 });
+
 
 
 
