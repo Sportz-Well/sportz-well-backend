@@ -150,7 +150,7 @@ async function ensureCoachDemoUser() {
 
 async function seedCoachDemoDataOnce(forceReset = false) {
 
-  const seedKey = "coach_demo_seed_v1";
+  const seedKey = "coach_demo_seed_v2";
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS app_flags (
@@ -176,8 +176,7 @@ async function seedCoachDemoDataOnce(forceReset = false) {
 
     await client.query("BEGIN");
 
-    await client.query("DELETE FROM assessment_sessions");
-    await client.query("DELETE FROM players");
+    await client.query("TRUNCATE TABLE assessment_sessions, players RESTART IDENTITY");
 
     const playersResult = await client.query(`
       INSERT INTO players(name,dob,gender,role) VALUES
@@ -190,35 +189,45 @@ async function seedCoachDemoDataOnce(forceReset = false) {
       RETURNING id
     `);
 
-    const scoreRows = [
-      { overall: 87, improvement: 6 },
-      { overall: 81, improvement: 4 },
-      { overall: 74, improvement: 3 },
-      { overall: 69, improvement: 2 },
-      { overall: 41, improvement: -4 },
-      { overall: 36, improvement: -6 }
+    const quarterDates = [
+      new Date("2025-06-15T10:00:00Z"),
+      new Date("2025-10-15T10:00:00Z"),
+      new Date("2026-02-15T10:00:00Z")
+    ];
+
+    const scoreSeries = [
+      [{ overall: 72, improvement: 2 }, { overall: 78, improvement: 4 }, { overall: 87, improvement: 6 }],
+      [{ overall: 70, improvement: 2 }, { overall: 76, improvement: 3 }, { overall: 81, improvement: 4 }],
+      [{ overall: 62, improvement: 1 }, { overall: 68, improvement: 2 }, { overall: 74, improvement: 3 }],
+      [{ overall: 60, improvement: 1 }, { overall: 64, improvement: 2 }, { overall: 69, improvement: 2 }],
+      [{ overall: 50, improvement: -1 }, { overall: 46, improvement: -3 }, { overall: 41, improvement: -4 }],
+      [{ overall: 48, improvement: -2 }, { overall: 42, improvement: -4 }, { overall: 36, improvement: -6 }]
     ];
 
     for(let i=0; i<playersResult.rows.length; i++){
 
       const playerId = playersResult.rows[i].id;
-      const score = scoreRows[i];
-      const createdAt = new Date(Date.now() - (scoreRows.length - i) * 60000);
+      const playerSeries = scoreSeries[i];
 
-      await client.query(
-        `INSERT INTO assessment_sessions
-         (user_id,physical_score,mental_score,skill_score,overall_score,improvement_pct,created_at)
-         VALUES($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          playerId,
-          score.overall,
-          score.overall,
-          score.overall,
-          score.overall,
-          score.improvement,
-          createdAt
-        ]
-      );
+      for(let q=0; q<playerSeries.length; q++){
+        const score = playerSeries[q];
+        const createdAt = new Date(quarterDates[q].getTime() + i * 60000);
+
+        await client.query(
+          `INSERT INTO assessment_sessions
+           (user_id,physical_score,mental_score,skill_score,overall_score,improvement_pct,created_at)
+           VALUES($1,$2,$3,$4,$5,$6,$7)`,
+          [
+            playerId,
+            score.overall,
+            score.overall,
+            score.overall,
+            score.overall,
+            score.improvement,
+            createdAt
+          ]
+        );
+      }
 
     }
 
