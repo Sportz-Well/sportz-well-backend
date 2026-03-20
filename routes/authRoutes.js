@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
 
 router.post("/login", async (req, res) => {
   try {
@@ -19,8 +20,14 @@ router.post("/login", async (req, res) => {
 
     const dbUser = user.rows[0];
 
-    if (password !== dbUser.password) {
-      return res.status(401).json({ error: "Invalid credentials" });
+    try {
+      const isMatch = dbUser.password ? await bcrypt.compare(password, dbUser.password) : false;
+      if (!isMatch) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+    } catch (err) {
+      console.error("[authRoutes] comparison error:", err.message);
+      return res.status(401).json({ error: "Authentication failed" });
     }
 
     const token = jwt.sign(

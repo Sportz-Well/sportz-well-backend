@@ -30,6 +30,10 @@ async function setup() {
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         name VARCHAR(255) NOT NULL,
         gender VARCHAR(10),
+        std VARCHAR(50),
+        div VARCHAR(50),
+        school_id_no VARCHAR(100),
+        aadhaar_card_no VARCHAR(20),
         school_id UUID REFERENCES schools(id) ON DELETE CASCADE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -51,7 +55,13 @@ async function setup() {
       );
     `);
 
-    console.log("Tables created successfully.");
+    console.log("Creating indexes...");
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_players_school_id ON players(school_id);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_assessment_sessions_user_id ON assessment_sessions(user_id);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_assessment_sessions_school_id ON assessment_sessions(school_id);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_assessment_sessions_lookup ON assessment_sessions(school_id, test_date DESC);`);
+
+    console.log("Tables and indexes created successfully.");
 
     process.exit();
   } catch (err) {
