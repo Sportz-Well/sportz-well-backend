@@ -75,18 +75,20 @@ function buildInsertSql(tableName, payload, returning = '*') {
 
 /**
  * Generate overall score for a player in a given quarter
- * At-risk players: [45, 38, 32] (out of 100)
- * On-track players: base role score + quarter delta
+ * At-risk players: [35, 30, 25] (out of 100) - ensures component scores < 5
+ * On-track players: base role score + quarter delta - produces component scores 6-10
  */
 function generateOverallScore(playerIndex, quarterIndex) {
   const isAtRisk = AT_RISK_INDICES.includes(playerIndex);
   
   if (isAtRisk) {
-    // At-risk trajectory: declining scores below 60 threshold
-    const atRiskScores = [45, 38, 32];
+    // At-risk trajectory: low scores with declining trend
+    // These convert to component scores 1-4 (< 5) so 'At Risk' category works correctly
+    const atRiskScores = [35, 30, 25];
     return atRiskScores[quarterIndex];
   } else {
     // On-track players: solid scores trending up
+    // These convert to component scores 6-10
     const roleBase = {
       'Batsman': 78,
       'Bowler': 76,
@@ -134,12 +136,14 @@ function calculateImprovement(current, previous) {
 /**
  * POST /api/v1/demo/reset
  * Wipe and recreate demo data for the authenticated school
+ * Defaults to school_id '1' if not assigned to user
  */
 router.post('/reset', authMiddleware, async (req, res) => {
   const client = await db.connect();
   
   try {
-    const schoolId = req.user.school_id;
+    // Default to school_id '1' if not assigned to user
+    const schoolId = req.user.school_id || '1';
     
     if (!schoolId) {
       return res.status(403).json({ error: 'No school assigned to user' });
