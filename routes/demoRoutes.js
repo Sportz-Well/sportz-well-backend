@@ -142,11 +142,26 @@ router.post('/reset', authMiddleware, async (req, res) => {
   const client = await db.connect();
   
   try {
-    // Default to school_id '1' if not assigned to user
-    const schoolId = req.user.school_id || '1';
+    // Get school_id from user, or create/use demo school
+    let schoolId = req.user.school_id;
     
     if (!schoolId) {
-      return res.status(403).json({ error: 'No school assigned to user' });
+      // Create or get demo school with a fixed UUID for consistency
+      const demoSchoolId = '550e8400-e29b-41d4-a716-446655440000'; // Fixed UUID for demo
+      
+      const schoolCheck = await client.query(
+        'SELECT id FROM schools WHERE id = $1',
+        [demoSchoolId]
+      );
+      
+      if (schoolCheck.rows.length === 0) {
+        // School doesn't exist, create it
+        await client.query(
+          'INSERT INTO schools (id, name) VALUES ($1, $2)',
+          [demoSchoolId, 'Demo School']
+        );
+      }
+      schoolId = demoSchoolId;
     }
 
     // Get table schemas
@@ -179,12 +194,15 @@ router.post('/reset', authMiddleware, async (req, res) => {
     for (const player of DEMO_PLAYERS) {
       const payload = {};
       setIfColumnExists(payload, playerColumns, 'name', player.name);
-      // ALWAYS include school_id explicitly (REQUIRED)
-      payload['school_id'] = '1';
+      // ALWAYS include school_id explicitly (REQUIRED) - as UUID
+      payload['school_id'] = schoolId;
       setIfColumnExists(payload, playerColumns, 'role', player.role);
       setIfColumnExists(payload, playerColumns, 'gender', player.gender);
-      setIfColumnExists(payload, playerColumns, 'standard', '8');
-      setIfColumnExists(payload, playerColumns, 'division', 'A');
+      // Use correct column names from schema (std, div instead of standard, division)
+      setIfColumnExists(payload, playerColumns, 'std', '8');
+      setIfColumnExists(payload, playerColumns, 'standard', '8');  // fallback
+      setIfColumnExists(payload, playerColumns, 'div', 'A');
+      setIfColumnExists(payload, playerColumns, 'division', 'A');  // fallback
       setIfColumnExists(payload, playerColumns, 'is_active', true);
       
       if (dobColumn) {
@@ -215,8 +233,8 @@ router.post('/reset', authMiddleware, async (req, res) => {
         const assessmentPayload = {};
         setIfColumnExists(assessmentPayload, assessmentColumns, 'user_id', playerId);
         setIfColumnExists(assessmentPayload, assessmentColumns, 'player_id', playerId);
-        // ALWAYS include school_id explicitly (REQUIRED)
-        assessmentPayload['school_id'] = '1';
+        // ALWAYS include school_id explicitly (REQUIRED) - as UUID
+        assessmentPayload['school_id'] = schoolId;
         setIfColumnExists(assessmentPayload, assessmentColumns, 'quarterly_cycle', quarter.label);
         setIfColumnExists(assessmentPayload, assessmentColumns, 'test_date', quarter.testDate);
         setIfColumnExists(assessmentPayload, assessmentColumns, 'overall_score', overallScore);
