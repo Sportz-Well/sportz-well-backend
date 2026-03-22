@@ -179,7 +179,8 @@ router.post('/reset', authMiddleware, async (req, res) => {
     for (const player of DEMO_PLAYERS) {
       const payload = {};
       setIfColumnExists(payload, playerColumns, 'name', player.name);
-      setIfColumnExists(payload, playerColumns, 'school_id', schoolId);
+      // ALWAYS include school_id explicitly (REQUIRED)
+      payload['school_id'] = '1';
       setIfColumnExists(payload, playerColumns, 'role', player.role);
       setIfColumnExists(payload, playerColumns, 'gender', player.gender);
       setIfColumnExists(payload, playerColumns, 'standard', '8');
@@ -214,7 +215,8 @@ router.post('/reset', authMiddleware, async (req, res) => {
         const assessmentPayload = {};
         setIfColumnExists(assessmentPayload, assessmentColumns, 'user_id', playerId);
         setIfColumnExists(assessmentPayload, assessmentColumns, 'player_id', playerId);
-        setIfColumnExists(assessmentPayload, assessmentColumns, 'school_id', schoolId);
+        // ALWAYS include school_id explicitly (REQUIRED)
+        assessmentPayload['school_id'] = '1';
         setIfColumnExists(assessmentPayload, assessmentColumns, 'quarterly_cycle', quarter.label);
         setIfColumnExists(assessmentPayload, assessmentColumns, 'test_date', quarter.testDate);
         setIfColumnExists(assessmentPayload, assessmentColumns, 'overall_score', overallScore);
