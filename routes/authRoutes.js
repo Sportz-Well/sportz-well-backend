@@ -43,20 +43,24 @@ router.get('/create-admin', async (req, res) => {
 
     const hashed = await bcrypt.hash(password, 10);
 
+    // 🔍 CHECK TABLE STRUCTURE FIRST
+    const test = await db.query(`SELECT * FROM users LIMIT 1`);
+    console.log('Users table exists');
+
+    // 🔁 TRY INSERT (WITHOUT ON CONFLICT FIRST)
     await db.query(
       `INSERT INTO users (email, password)
-       VALUES ($1, $2)
-       ON CONFLICT (email)
-       DO UPDATE SET password = $2`,
+       VALUES ($1, $2)`,
       [email, hashed]
     );
 
-    res.json({ success: true });
+    res.json({ success: true, message: 'Inserted fresh user' });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to create admin' });
+    console.error('CREATE ADMIN ERROR:', err.message);
+
+    res.status(500).json({
+      error: err.message
+    });
   }
 });
-
-module.exports = router;
