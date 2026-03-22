@@ -5,50 +5,32 @@ const cors = require('cors');
 
 const app = express();
 
-// --------------------
-// MIDDLEWARE
-// --------------------
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// --------------------
-// ROUTES IMPORT
-// --------------------
-const authRoutes = require('./routes/authRoutes');
+// ROUTES
 const playerRoutes = require('./routes/playerRoutes');
 const assessmentRoutes = require('./routes/assessmentRoutes');
-const dashboardRoutes = require('./routes/dashboardRoutes');
-const analyticsRoutes = require('./routes/analytics'); // ✅ IMPORTANT
+const analyticsRoutes = require('./routes/analytics');
 
-// --------------------
-// ROUTES MOUNTING
-// --------------------
-app.use('/api/v1/auth', authRoutes);
+// ✅ AUTH ROUTE (CRITICAL)
+const authRoutes = require('./routes/authRoutes');
+
+// Route Mapping
 app.use('/api/v1/players', playerRoutes);
-app.use('/api/v1/assessments', assessmentRoutes);
-app.use('/api/v1/dashboard', dashboardRoutes);
-app.use('/api/v1/analytics', analyticsRoutes); // ✅ FIX ADDED
+app.use('/api/v1/assessment', assessmentRoutes);
+app.use('/api/v1/analytics', analyticsRoutes);
 
-// --------------------
-// HEALTH CHECK
-// --------------------
+// ✅ AUTH ROUTE CONNECTED
+app.use('/api/v1/auth', authRoutes);
+
+// Health Check
 app.get('/', (req, res) => {
-  res.send('Sportz-Well Backend Running');
+  res.send('API is running...');
 });
 
-// --------------------
-// 404 HANDLER
-// --------------------
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: `Route not found: ${req.method} ${req.originalUrl}`
-  });
-});
-
-// --------------------
-// SERVER START
-// --------------------
+// Server Start
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {

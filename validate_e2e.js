@@ -37,10 +37,10 @@ async function validate() {
     console.log('[4/7] Testing Assessment Save...');
     const assessmentData = {
       player_id: TEST_PLAYER_ID,
-      physical_score: 80,
-      skill_score: 75,
-      mental_score: 85,
-      coach_score: 90,
+      physical_score: 8,
+      skill_score: 7,
+      mental_score: 9,
+      coach_score: 9,
       quarterly_cycle: 'Quarter 1'
     };
     const saveRes = await axios.post(`${BASE_URL}/assessments/save`, assessmentData, authHeaders);

@@ -1,49 +1,43 @@
-require('dotenv').config();
-const { Pool } = require('pg');
-const bcrypt = require('bcrypt');
+'use strict';
 
-const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
-});
+const bcrypt = require('bcrypt');
+const db = require('./db');
 
 async function createAdmin() {
   try {
-    const hashedPassword = await bcrypt.hash("admin123", 10);
+    const email = 'admin@sportzwell.com';
+    const password = 'admin123';
 
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        email VARCHAR(255) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        school_id UUID REFERENCES schools(id),
-        role VARCHAR(50) DEFAULT 'admin',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const existing = await db.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (existing.rows.length > 0) {
+      console.log('User already exists. Updating password...');
+
+      await db.query(
+        'UPDATE users SET password = $1 WHERE email = $2',
+        [hashedPassword, email]
       );
-    `);
 
-    const schoolResult = await pool.query(`SELECT id FROM schools LIMIT 1`);
-    const schoolId = schoolResult.rows[0].id;
+      console.log('Password updated successfully.');
+    } else {
+      console.log('Creating new admin user...');
 
-    await pool.query(`
-      INSERT INTO users (email, password, school_id, role)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (email) DO NOTHING
-    `, [
-      'admin@sportzwell.com',
-      hashedPassword,
-      schoolId,
-      'admin'
-    ]);
+      await db.query(
+        'INSERT INTO users (email, password) VALUES ($1, $2)',
+        [email, hashedPassword]
+      );
 
-    console.log("Admin user created.");
+      console.log('Admin user created.');
+    }
+
     process.exit();
-
   } catch (err) {
-    console.error(err);
+    console.error('Error:', err);
     process.exit(1);
   }
 }

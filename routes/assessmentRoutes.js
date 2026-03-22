@@ -59,7 +59,7 @@ async function saveAssessment(req, res) {
 
     const allScores = [physical, skill, mental, coach];
     if (!allScores.every(scoreInRange)) {
-      return res.status(400).json({ error: 'Scores must be between 0 and 100' });
+      return res.status(400).json({ error: 'Scores must be between 1 and 10' });
     }
 
     const overall = Math.round((physical + skill + mental + coach) / 4);
