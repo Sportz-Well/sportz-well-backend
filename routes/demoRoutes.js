@@ -135,45 +135,18 @@ function calculateImprovement(current, previous) {
 
 /**
  * POST /api/v1/demo/reset
- * Wipe and recreate demo data for the authenticated school
- * Defaults to school_id '1' if not assigned to user
+ * Wipe and recreate demo data with school_id = 1
  */
 router.post('/reset', authMiddleware, async (req, res) => {
   const client = await db.connect();
   
   try {
-    // Get school_id from user, or create/use demo school
-    let schoolId = req.user.school_id;
-    
-    if (!schoolId) {
-      // Create or get demo school with a fixed UUID for consistency
-      const demoSchoolId = '550e8400-e29b-41d4-a716-446655440000'; // Fixed UUID for demo
-      
-      const schoolCheck = await client.query(
-        'SELECT id FROM schools WHERE id = $1',
-        [demoSchoolId]
-      );
-      
-      if (schoolCheck.rows.length === 0) {
-        // School doesn't exist, create it
-        await client.query(
-          'INSERT INTO schools (id, name) VALUES ($1, $2)',
-          [demoSchoolId, 'Demo School']
-        );
-      }
-      schoolId = demoSchoolId;
-    }
+    // Use hardcoded school_id = 1
+    const schoolId = 1;
 
     // Get table schemas
     const playerColumns = await getColumns('players');
     const assessmentColumns = await getColumns('assessment_sessions');
-
-    if (!playerColumns.has('school_id')) {
-      return res.status(500).json({ error: 'players.school_id column is required' });
-    }
-    if (!assessmentColumns.has('school_id') || !assessmentColumns.has('user_id')) {
-      return res.status(500).json({ error: 'Missing required assessment columns' });
-    }
 
     // Determine DOB column name
     const dobColumn = playerColumns.has('date_of_birth') ? 'date_of_birth'
@@ -194,7 +167,7 @@ router.post('/reset', authMiddleware, async (req, res) => {
     for (const player of DEMO_PLAYERS) {
       const payload = {};
       setIfColumnExists(payload, playerColumns, 'name', player.name);
-      // ALWAYS include school_id explicitly (REQUIRED) - as UUID
+      // ALWAYS include school_id explicitly (REQUIRED) - as integer 1
       payload['school_id'] = schoolId;
       setIfColumnExists(payload, playerColumns, 'role', player.role);
       setIfColumnExists(payload, playerColumns, 'gender', player.gender);
@@ -233,7 +206,7 @@ router.post('/reset', authMiddleware, async (req, res) => {
         const assessmentPayload = {};
         setIfColumnExists(assessmentPayload, assessmentColumns, 'user_id', playerId);
         setIfColumnExists(assessmentPayload, assessmentColumns, 'player_id', playerId);
-        // ALWAYS include school_id explicitly (REQUIRED) - as UUID
+        // ALWAYS include school_id explicitly (REQUIRED) - as integer 1
         assessmentPayload['school_id'] = schoolId;
         setIfColumnExists(assessmentPayload, assessmentColumns, 'quarterly_cycle', quarter.label);
         setIfColumnExists(assessmentPayload, assessmentColumns, 'test_date', quarter.testDate);
