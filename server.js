@@ -13,6 +13,7 @@ app.use(express.json());
 const playerRoutes = require('./routes/playerRoutes');
 const assessmentRoutes = require('./routes/assessmentRoutes');
 const analyticsRoutes = require('./routes/analytics');
+const demoRoutes = require('./routes/demoRoutes');
 
 // ✅ AUTH ROUTE (CRITICAL)
 const authRoutes = require('./routes/authRoutes');
@@ -21,6 +22,7 @@ const authRoutes = require('./routes/authRoutes');
 app.use('/api/v1/players', playerRoutes);
 app.use('/api/v1/assessment', assessmentRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
+app.use('/api/v1/demo', demoRoutes);
 
 // ✅ AUTH ROUTE CONNECTED
 app.use('/api/v1/auth', authRoutes);
