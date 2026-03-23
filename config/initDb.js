@@ -10,6 +10,7 @@ async function initDb() {
 
     await client.query('BEGIN');
 
+    // PLAYERS TABLE
     await client.query(`
       CREATE TABLE IF NOT EXISTS players (
         id SERIAL PRIMARY KEY,
@@ -18,12 +19,13 @@ async function initDb() {
         gender TEXT,
         standard TEXT,
         division TEXT,
-        is_active BOOLEAN DEFAULT true,
         school_id INTEGER DEFAULT 1,
+        is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
+    // ASSESSMENT TABLE
     await client.query(`
       CREATE TABLE IF NOT EXISTS assessment_sessions (
         id SERIAL PRIMARY KEY,
@@ -36,13 +38,21 @@ async function initDb() {
         physical_score NUMERIC,
         skill_score NUMERIC,
         mental_score NUMERIC,
+        risk_status TEXT,
+        coach_feedback TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
+    // SAFE COLUMN PATCHES
     await client.query(`
       ALTER TABLE players
       ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1;
+    `);
+
+    await client.query(`
+      ALTER TABLE players
+      ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
     `);
 
     await client.query(`
