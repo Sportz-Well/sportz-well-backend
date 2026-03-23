@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
+// DASHBOARD
 router.get('/dashboard', async (req, res) => {
   try {
     const totalPlayers = await db.query(`SELECT COUNT(*) FROM players`);
@@ -23,13 +24,16 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
+// 🔥 SAFE TREND (NO quarterly_cycle dependency)
 router.get('/trend', async (req, res) => {
   try {
     const data = await db.query(`
-      SELECT quarterly_cycle, ROUND(AVG(overall_score),2) as avg_score
+      SELECT 
+        TO_CHAR(test_date, 'Mon') as label,
+        ROUND(AVG(overall_score),2) as avg_score
       FROM assessment_sessions
-      GROUP BY quarterly_cycle
-      ORDER BY quarterly_cycle
+      GROUP BY label
+      ORDER BY MIN(test_date)
     `);
 
     res.json({
@@ -38,7 +42,10 @@ router.get('/trend', async (req, res) => {
     });
 
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
   }
 });
 
