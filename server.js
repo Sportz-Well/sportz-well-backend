@@ -5,36 +5,33 @@ const cors = require('cors');
 
 const app = express();
 
-// Middleware
+// ✅ Middleware
 app.use(cors());
 app.use(express.json());
 
-// ROUTES
+// ✅ ROUTES IMPORT
 const playerRoutes = require('./routes/playerRoutes');
 const assessmentRoutes = require('./routes/assessmentRoutes');
-const analyticsRoutes = require('./routes/analytics');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 const demoRoutes = require('./routes/demoRoutes');
-
-// ✅ AUTH ROUTE (CRITICAL)
 const authRoutes = require('./routes/authRoutes');
+const adminRoutes = require('./routes/adminRoutes'); // ✅ NEW
 
-// Route Mapping
+// ✅ ROUTE MAPPING
 app.use('/api/v1/players', playerRoutes);
 app.use('/api/v1/assessment', assessmentRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/demo', demoRoutes);
-
-// ✅ AUTH ROUTE CONNECTED
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/admin', adminRoutes); // ✅ NEW
 
-// Health Check
+// ✅ HEALTH CHECK
 app.get('/', (req, res) => {
-  res.send('API is running...');
+  res.send('Sportz-Well Backend Running ✅');
 });
 
-// Server Start
+// ✅ SERVER START
 const PORT = process.env.PORT || 5000;
-
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
