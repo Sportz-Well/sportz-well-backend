@@ -6,31 +6,30 @@ async function initDb() {
   const client = await db.connect();
 
   try {
-    console.log('Initializing database...');
+    console.log('🔥 CLEAN RESET (NO school_id)');
 
     await client.query('BEGIN');
 
-    // PLAYERS TABLE
+    await client.query(`DROP TABLE IF EXISTS assessment_sessions CASCADE;`);
+    await client.query(`DROP TABLE IF EXISTS players CASCADE;`);
+
     await client.query(`
-      CREATE TABLE IF NOT EXISTS players (
+      CREATE TABLE players (
         id SERIAL PRIMARY KEY,
         name TEXT,
         role TEXT,
         gender TEXT,
         standard TEXT,
         division TEXT,
-        school_id INTEGER DEFAULT 1,
         is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
-    // ASSESSMENT TABLE
     await client.query(`
-      CREATE TABLE IF NOT EXISTS assessment_sessions (
+      CREATE TABLE assessment_sessions (
         id SERIAL PRIMARY KEY,
         user_id INTEGER,
-        school_id INTEGER DEFAULT 1,
         quarterly_cycle TEXT,
         test_date DATE,
         overall_score NUMERIC,
@@ -38,35 +37,17 @@ async function initDb() {
         physical_score NUMERIC,
         skill_score NUMERIC,
         mental_score NUMERIC,
-        risk_status TEXT,
-        coach_feedback TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
-    // SAFE COLUMN PATCHES
-    await client.query(`
-      ALTER TABLE players
-      ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1;
-    `);
-
-    await client.query(`
-      ALTER TABLE players
-      ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
-    `);
-
-    await client.query(`
-      ALTER TABLE assessment_sessions
-      ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1;
-    `);
-
     await client.query('COMMIT');
 
-    console.log('Database initialized successfully');
+    console.log('✅ DB READY (NO school_id)');
 
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('DB Init Error:', err);
+    console.error('❌ INIT FAILED:', err);
   } finally {
     client.release();
   }
