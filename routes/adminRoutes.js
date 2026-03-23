@@ -5,12 +5,11 @@ const db = require('../db');
 
 const router = express.Router();
 
-// OPTIONAL: basic protection (safe for now)
 function requireResetAuthorization(req, res, next) {
   const configuredKey = process.env.ADMIN_RESET_KEY;
 
   if (!configuredKey) {
-    return next(); // allow for demo
+    return next();
   }
 
   const providedKey =
@@ -34,12 +33,11 @@ router.get('/clean', requireResetAuthorization, async (_req, res) => {
   try {
     await client.query('BEGIN');
 
-    // FULL RESET (FAST & RELIABLE)
+    // Only truncate tables that exist
     await client.query(`
       TRUNCATE TABLE 
         assessment_sessions,
-        players,
-        schools
+        players
       RESTART IDENTITY CASCADE;
     `);
 
@@ -47,7 +45,7 @@ router.get('/clean', requireResetAuthorization, async (_req, res) => {
 
     return res.json({
       success: true,
-      message: 'Database fully reset'
+      message: 'Database fully reset (existing tables only)'
     });
 
   } catch (err) {
