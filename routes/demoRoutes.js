@@ -42,21 +42,27 @@ const QUARTERS = [
 ];
 
 /**
- * Get table columns to ensure compatibility with dynamic schema
- * (Avoids JOIN on schools table as requested)
+ * Get table column info (name and type)
  */
-async function getColumns(tableName) {
+async function getTableInfo(tableName) {
   try {
     const result = await db.query(
-      `SELECT column_name
+      `SELECT column_name, data_type
        FROM information_schema.columns
        WHERE table_schema = 'public' AND table_name = $1`,
       [tableName]
     );
-    return new Set(result.rows.map(row => row.column_name));
+    const columns = new Set();
+    const types = new Map();
+    
+    for (const row of result.rows) {
+      columns.add(row.column_name);
+      types.set(row.column_name, row.data_type);
+    }
+    return { columns, types };
   } catch (err) {
     console.error(`Error getting columns for ${tableName}:`, err.message);
-    return new Set();
+    return { columns: new Set(), types: new Map() };
   }
 }
 
@@ -87,6 +93,20 @@ function buildInsertSql(tableName, payload, returning = '*') {
 }
 
 /**
+ * Calculate age from DOB
+ */
+function calculateAge(dobString) {
+  const birthDate = new Date(dobString);
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+}
+
+/**
  * Generate overall score for a player (0-100 scale)
  * Ensures At Risk players have scores that convert to < 5 component scores
  */
@@ -94,8 +114,8 @@ function generateOverallScore(playerIndex, quarterIndex) {
   const isAtRisk = AT_RISK_INDICES.includes(playerIndex);
   
   if (isAtRisk) {
-    // At-risk: Low scores (below 50 ensure baseValue < 5)
-    // Decreasing trend to emphasize risk
+    // At-risk: Low scores (below 45 ensure baseValue < 5)
+    // 38 -> 3.8, 32 -> 3.2, 28 -> 2.8
     const atRiskScores = [38, 32, 28];
     return atRiskScores[quarterIndex];
   } else {
@@ -137,21 +157,22 @@ router.post('/reset', authMiddleware, async (req, res) => {
   const client = await db.connect();
   
   try {
-    // Requirement 2: Hardcode school_id = 1
-    const schoolId = 1;
+    // Get schema info
+    const playerSchema = await getTableInfo('players');
+    const assessmentSchema = await getTableInfo('assessment_sessions');
 
-    // Requirement 1: No JOINs or queries to schools table. 
-    // We get columns for players and assessment_sessions directly.
-    const playerColumns = await getColumns('players');
-    const assessmentColumns = await getColumns('assessment_sessions');
-
-    if (playerColumns.size === 0 || assessmentColumns.size === 0) {
+    if (playerSchema.columns.size === 0 || assessmentSchema.columns.size === 0) {
       throw new Error('Database tables (players/assessment_sessions) missing or inaccessible.');
     }
 
-    const dobColumn = playerColumns.has('date_of_birth') ? 'date_of_birth'
-                     : playerColumns.has('dob') ? 'dob'
-                     : 'birth_date';
+    // Determine School ID based on column type
+    // If UUID, use a static UUID. If Integer, use 1.
+    const schoolIdType = playerSchema.types.get('school_id');
+    const schoolId = (schoolIdType === 'uuid') 
+      ? '00000000-0000-0000-0000-000000000001' 
+      : 1;
+
+    console.log(`[demo/reset] Using school_id: ${schoolId} (type: ${schoolIdType})`);
 
     await client.query('BEGIN');
 
@@ -162,23 +183,33 @@ router.post('/reset', authMiddleware, async (req, res) => {
     const insertedPlayers = [];
     
     // Insert 15 dummy players
-    for (const player of DEMO_PLAYERS) {
+    for (let i = 0; i < DEMO_PLAYERS.length; i++) {
+      const player = DEMO_PLAYERS[i];
       const payload = {
         name: player.name,
-        school_id: schoolId, // Hardcoded integer 1
+        school_id: schoolId,
         gender: player.gender,
         is_active: true
       };
 
-      setIfColumnExists(payload, playerColumns, 'role', player.role);
-      setIfColumnExists(payload, playerColumns, 'std', '8');
-      setIfColumnExists(payload, playerColumns, 'standard', '8');
-      setIfColumnExists(payload, playerColumns, 'div', 'A');
-      setIfColumnExists(payload, playerColumns, 'division', 'A');
+      // Populate Required Fields
+      setIfColumnExists(payload, playerSchema.columns, 'role', player.role);
+      setIfColumnExists(payload, playerSchema.columns, 'std', '8');
+      setIfColumnExists(payload, playerSchema.columns, 'div', 'A');
+      setIfColumnExists(payload, playerSchema.columns, 'age', calculateAge(player.dob));
+      setIfColumnExists(payload, playerSchema.columns, 'school_id_no', `SCH-${2026001 + i}`);
+      setIfColumnExists(payload, playerSchema.columns, 'aadhaar_card_no', `9876-5432-${1000 + i}`);
       
-      if (playerColumns.has(dobColumn)) {
-        payload[dobColumn] = player.dob;
+      // Handle DOB/Date fields
+      if (playerSchema.columns.has('date_of_birth')) {
+        payload['date_of_birth'] = player.dob;
+      } else if (playerSchema.columns.has('dob')) {
+        payload['dob'] = player.dob;
       }
+
+      // Fallbacks for std/div variations if schema differs
+      setIfColumnExists(payload, playerSchema.columns, 'standard', '8');
+      setIfColumnExists(payload, playerSchema.columns, 'division', 'A');
 
       const { sql, values } = buildInsertSql('players', payload, 'id, name');
       const result = await client.query(sql, values);
@@ -201,7 +232,7 @@ router.post('/reset', authMiddleware, async (req, res) => {
         const improvement = prevScore === null ? 0 : Math.round(((overall - prevScore) / prevScore) * 100);
 
         const aPayload = {
-          school_id: schoolId, // Hardcoded integer 1
+          school_id: schoolId,
           quarterly_cycle: quarter.label,
           test_date: quarter.testDate,
           overall_score: overall,
@@ -210,27 +241,35 @@ router.post('/reset', authMiddleware, async (req, res) => {
         };
 
         // Handle inconsistent naming (user_id vs player_id)
-        setIfColumnExists(aPayload, assessmentColumns, 'user_id', playerId);
-        setIfColumnExists(aPayload, assessmentColumns, 'player_id', playerId);
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'user_id', playerId);
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'player_id', playerId);
 
         // Component scores (Requirement 3: 4 players will have these < 5)
-        setIfColumnExists(aPayload, assessmentColumns, 'physical_score', components.physical);
-        setIfColumnExists(aPayload, assessmentColumns, 'skill_score', components.skill);
-        setIfColumnExists(aPayload, assessmentColumns, 'mental_score', components.mental);
-        setIfColumnExists(aPayload, assessmentColumns, 'coach_score', components.coach);
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'physical_score', components.physical);
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'skill_score', components.skill);
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'mental_score', components.mental);
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'coach_score', components.coach);
 
         // Feedback
         const feedback = overall < 60 
           ? 'Needs immediate attention and focused training.' 
           : 'Showing steady progress. Continue current drills.';
-        setIfColumnExists(aPayload, assessmentColumns, 'coach_feedback', feedback);
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'coach_feedback', feedback);
 
         // Detailed Skill Scores
         const skillBase = overall / 10;
-        setIfColumnExists(aPayload, assessmentColumns, 'speed_score', Math.min(10, skillBase + 0.1));
-        setIfColumnExists(aPayload, assessmentColumns, 'agility_score', Math.min(10, skillBase - 0.1));
-        setIfColumnExists(aPayload, assessmentColumns, 'batting_score', skillBase + (player.role === 'Batsman' ? 0.5 : 0));
-        setIfColumnExists(aPayload, assessmentColumns, 'bowling_score', skillBase + (player.role === 'Bowler' ? 0.5 : 0));
+        // Ensure keys match DB schema exactly
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'speed_score', Math.min(10, skillBase + 0.1));
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'agility_score', Math.min(10, skillBase - 0.1));
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'batting_score', skillBase + (player.role === 'Batsman' ? 0.5 : 0));
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'bowling_score', skillBase + (player.role === 'Bowler' ? 0.5 : 0));
+        
+        // Add other skill scores if they exist
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'endurance_score', Math.min(10, skillBase));
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'fielding_score', Math.min(10, skillBase + 0.2));
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'focus_score', Math.min(10, skillBase - 0.2));
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'discipline_score', Math.min(10, skillBase));
+        setIfColumnExists(aPayload, assessmentSchema.columns, 'game_awareness_score', Math.min(10, skillBase));
 
         const { sql, values } = buildInsertSql('assessment_sessions', aPayload, 'id');
         await client.query(sql, values);
@@ -246,6 +285,7 @@ router.post('/reset', authMiddleware, async (req, res) => {
       message: 'Demo data reset successful',
       data: {
         schoolId,
+        schoolIdType,
         players: DEMO_PLAYERS.length,
         atRisk: AT_RISK_INDICES.length,
         assessmentsPerPlayer: QUARTERS.length
