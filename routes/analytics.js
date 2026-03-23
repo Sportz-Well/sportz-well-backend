@@ -1,16 +1,13 @@
-'use strict';
+﻿'use strict';
 
 const express = require('express');
+const analyticsController = require('../controllers/analyticsController');
+const authMiddleware = require('../middleware/authMiddleware');
+
 const router = express.Router();
 
-// TEMP SAFE ROUTES (to prevent crash)
-
-router.get('/dashboard', (req, res) => {
-  res.json({ success: true, message: 'Dashboard working' });
-});
-
-router.get('/trend', (req, res) => {
-  res.json({ success: true, message: 'Trend working' });
-});
+router.get('/dashboard', authMiddleware, analyticsController.getDashboardAnalytics);
+router.get('/dashboard/trend', authMiddleware, analyticsController.getSchoolTrend);
+router.get('/trend', authMiddleware, analyticsController.getSchoolTrend);
 
 module.exports = router;
