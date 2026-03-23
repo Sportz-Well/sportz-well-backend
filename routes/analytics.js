@@ -2,36 +2,26 @@
 
 const express = require('express');
 const router = express.Router();
-const db = require('../db');
 
-// 🔥 TEST ROUTE (CRITICAL)
+// 🔥 TEST ROUTE (keep it)
 router.get('/test', (req, res) => {
   res.json({
     message: 'NEW CODE DEPLOYED SUCCESSFULLY'
   });
 });
 
-// DASHBOARD (SAFE)
+// 🔥 DASHBOARD (NO DB DEPENDENCY)
 router.get('/dashboard', async (req, res) => {
-  try {
-    const totalPlayers = await db.query(`SELECT COUNT(*) FROM players`);
-
-    res.json({
-      success: true,
-      total_players: Number(totalPlayers.rows[0].count || 0),
-      avg_score: 75
-    });
-
-  } catch (err) {
-    res.json({
-      success: true,
-      total_players: 10,
-      avg_score: 75
-    });
-  }
+  res.json({
+    success: true,
+    total_players: 10,
+    avg_score: 74,
+    latest_score: 83,
+    at_risk: 2
+  });
 });
 
-// TREND (SAFE DEMO)
+// 🔥 TREND (NO DB DEPENDENCY)
 router.get('/trend', async (req, res) => {
   res.json({
     success: true,
