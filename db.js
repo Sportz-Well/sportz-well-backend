@@ -54,11 +54,26 @@ async function end() {
   return pool.end();
 }
 
+async function runStartupPatch() {
+  try {
+    // Add school_id to players if missing
+    await query('ALTER TABLE players ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1;');
+    // Add school_id to assessment_sessions if missing
+    await query('ALTER TABLE assessment_sessions ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1;');
+    console.log('[db] Startup patch applied: school_id column verified on players and assessment_sessions tables.');
+  } catch (err) {
+    console.error('[db] Startup patch failed:', err.message);
+  }
+}
+
 async function testConnection() {
   try {
     const result = await query('SELECT NOW() AS now');
     const sslStatus = useSsl() ? 'on' : 'off';
     console.log(`[db] Connected successfully | ssl=${sslStatus} | now=${result.rows[0].now}`);
+    
+    // Run startup patches
+    await runStartupPatch();
   } catch (err) {
     console.error('[db] Connection failed:', err.message);
   }
