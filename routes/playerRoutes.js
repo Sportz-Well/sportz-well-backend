@@ -10,9 +10,9 @@ const players = [
     age: 14,
     gender: "Male",
     role: "Batsman",
-    school: "Don Bosco",
-    aadhaar: "1234",
-    standard: "9th",
+    school_id: "SCH001",
+    aadhaar_no: "1234",
+    standard: "9",
     division: "A"
   },
   {
@@ -21,24 +21,29 @@ const players = [
     age: 13,
     gender: "Female",
     role: "All-Rounder",
-    school: "DAV",
-    aadhaar: "5678",
-    standard: "8th",
+    school_id: "SCH002",
+    aadhaar_no: "5678",
+    standard: "8",
     division: "B"
   }
 ];
 
+// 🔥 RETURN PURE ARRAY (CRITICAL FIX)
 router.get('/', (req, res) => {
-  res.json({ success: true, data: players });
+  res.json(players);
 });
 
+// 🔥 SINGLE PLAYER
 router.get('/:id', (req, res) => {
   const player = players.find(p => p.id == req.params.id);
-  res.json({ success: true, data: player });
+  res.json(player);
 });
 
+// 🔥 ADD PLAYER (mock)
 router.post('/', (req, res) => {
-  res.json({ success: true, message: "Player added" });
+  res.json({
+    message: "Player added successfully"
+  });
 });
 
 module.exports = router;
