@@ -1,92 +1,36 @@
 'use strict';
 
-const { Pool } = require('pg');
-const dotenv = require('dotenv');
+const pool = require('./config/db');
 
-dotenv.config();
-
-function parseBool(value, defaultValue = false) {
-  if (value === undefined || value === null || value === '') return defaultValue;
-  const normalized = String(value).trim().toLowerCase();
-  return ['1', 'true', 'yes', 'y', 'on'].includes(normalized);
-}
-
-function useSsl() {
-  if (process.env.DB_SSL !== undefined) return parseBool(process.env.DB_SSL, false);
-  return process.env.NODE_ENV === 'production';
-}
-
-function buildPgConfig() {
-  const ssl = useSsl() ? { rejectUnauthorized: false } : false;
-
-  if (process.env.DATABASE_URL) {
-    return {
-      connectionString: process.env.DATABASE_URL,
-      ssl
-    };
-  }
-
-  return {
-    host: process.env.DB_HOST || 'localhost',
-    port: Number(process.env.DB_PORT || 5432),
-    user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'postgres',
-    ssl
-  };
-}
-
-const pool = new Pool(buildPgConfig());
-
-pool.on('error', (err) => {
-  console.error('[db] Unexpected pool error:', err.message);
-});
-
-async function query(text, params = []) {
-  return pool.query(text, params);
-}
-
-async function connect() {
-  return pool.connect();
-}
-
-async function end() {
-  return pool.end();
-}
-
+/**
+ * Startup Patch: Runs right after connecting
+ */
 async function runStartupPatch() {
   try {
-    // Add school_id to players if missing
-    await query('ALTER TABLE players ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1;');
-    // Add school_id to assessment_sessions if missing
-    await query('ALTER TABLE assessment_sessions ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1;');
-    console.log('[db] Startup patch applied: school_id column verified on players and assessment_sessions tables.');
+    const patchSql = `
+      ALTER TABLE players 
+      ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1, 
+      ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS school_id_no VARCHAR,
+      ADD COLUMN IF NOT EXISTS aadhaar_card_no VARCHAR,
+      ADD COLUMN IF NOT EXISTS gender VARCHAR,
+      ADD COLUMN IF NOT EXISTS age INTEGER,
+      ADD COLUMN IF NOT EXISTS std VARCHAR,
+      ADD COLUMN IF NOT EXISTS div VARCHAR,
+      ADD COLUMN IF NOT EXISTS role VARCHAR;
+    `;
+    await pool.query(patchSql);
+    console.log('✅ Startup patch applied: All columns verified on players table.');
   } catch (err) {
-    console.error('[db] Startup patch failed:', err.message);
+    console.error('❌ Startup patch failed:', err.message);
   }
 }
 
-async function testConnection() {
-  try {
-    const result = await query('SELECT NOW() AS now');
-    const sslStatus = useSsl() ? 'on' : 'off';
-    console.log(`[db] Connected successfully | ssl=${sslStatus} | now=${result.rows[0].now}`);
-    
-    // Run startup patches
-    await runStartupPatch();
-  } catch (err) {
-    console.error('[db] Connection failed:', err.message);
-  }
-}
+// Execute patch (this will run when root db.js is first required)
+runStartupPatch();
 
-if (process.env.NODE_ENV !== 'test') {
-  testConnection();
-}
-
-// Export compatible object for all current usages
 module.exports = {
-  query,
-  connect,
-  end,
-  pool
+  query: (text, params) => pool.query(text, params),
+  connect: () => pool.connect(),
+  pool: pool
 };
