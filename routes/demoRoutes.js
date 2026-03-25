@@ -174,7 +174,7 @@ router.post('/reset', authMiddleware, async (req, res) => {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
         [p.name, p.role, p.gender, p.dob, age, '8', 'A', schoolId, true, schoolIdNo, aadhaarNo]
       );
-      const playerId = playerRes.rows[0].id;
+      const playerId = playerRes.rows[0].id; // This UUID is the foreign key for assessments
 
       // INSERT 3 Assessments per player
       const isAtRisk = AT_RISK_INDICES.includes(i);
@@ -185,15 +185,25 @@ router.post('/reset', authMiddleware, async (req, res) => {
         const scores = generateScores(isAtRisk, q);
         const improvement = prevScore === null ? 0 : Math.round(((scores.overall - prevScore) / prevScore) * 100);
 
+        // LINKING: user_id = playerId (UUID from players table)
         await client.query(
           `INSERT INTO assessment_sessions 
            (user_id, school_id, quarterly_cycle, test_date, overall_score, improvement_pct, risk_status, 
-            physical_score, skill_score, mental_score, coach_score)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            physical_score, skill_score, mental_score, coach_score, coach_feedback)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
           [
-            playerId, schoolId, quarter.label, quarter.testDate, scores.overall, improvement, 
+            playerId, 
+            schoolId, 
+            quarter.label, 
+            quarter.testDate, 
+            scores.overall, 
+            improvement, 
             scores.overall < 60 ? 'At Risk' : 'On Track',
-            scores.physical, scores.skill, scores.mental, scores.coach
+            scores.physical, 
+            scores.skill, 
+            scores.mental, 
+            scores.coach,
+            scores.overall < 60 ? 'Needs immediate attention and focused training.' : 'Showing steady progress. Continue current drills.'
           ]
         );
         prevScore = scores.overall;

@@ -29,18 +29,16 @@ router.get('/dashboard', async (req, res) => {
     );
 
     // 3. Count At Risk Players (Latest assessment per player)
-    // We count distinct user_ids who had 'At Risk' status in their latest assessment
+    // Counts distinct user_ids where the MOST RECENT test_date record has 'At Risk' status
     const atRiskRes = await db.query(`
-      SELECT COUNT(DISTINCT user_id) as count 
-      FROM assessment_sessions 
-      WHERE school_id = $1 
-        AND risk_status = 'At Risk' 
-        AND (user_id, test_date) IN (
-          SELECT user_id, MAX(test_date)
-          FROM assessment_sessions
-          WHERE school_id = $1
-          GROUP BY user_id
-        )
+      SELECT COUNT(*) as count 
+      FROM (
+        SELECT DISTINCT ON (user_id) risk_status
+        FROM assessment_sessions
+        WHERE school_id = $1
+        ORDER BY user_id, test_date DESC
+      ) AS latest_assessments
+      WHERE risk_status = 'At Risk'
     `, [schoolId]);
 
     res.json({
