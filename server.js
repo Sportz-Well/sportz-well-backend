@@ -57,7 +57,7 @@ app.get('/api/create-coach-demo', async (req, res) => {
       await db.query('UPDATE users SET password = $1 WHERE email = $2', [hashedPassword, email]);
       res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach password updated to demo123!</h1><p style="font-family:sans-serif;">You can now log in.</p>');
     } else {
-      await db.query('INSERT INTO users (email, password) VALUES ($1, $2)', [email, hashedPassword]);
+      await db.query('INSERT INTO users (email, password, role) VALUES ($1, $2, $3)', [email, hashedPassword, 'coach']);
       res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach account created with demo123!</h1><p style="font-family:sans-serif;">You can now log in.</p>');
     }
   } catch (err) {
