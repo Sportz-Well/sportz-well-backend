@@ -43,6 +43,29 @@ app.get('/health', (_req, res) => {
   });
 });
 
+// --- TEMPORARY BACKDOOR TO CREATE COACH ACCOUNT ---
+app.get('/api/create-coach-demo', async (req, res) => {
+  const bcrypt = require('bcrypt');
+  const db = require('./db');
+  try {
+    const email = 'coach@sportz-well.com';
+    const password = 'demo123';
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const existing = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (existing.rows.length > 0) {
+      await db.query('UPDATE users SET password = $1 WHERE email = $2', [hashedPassword, email]);
+      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach password updated to demo123!</h1><p style="font-family:sans-serif;">You can now log in.</p>');
+    } else {
+      await db.query('INSERT INTO users (email, password) VALUES ($1, $2)', [email, hashedPassword]);
+      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach account created with demo123!</h1><p style="font-family:sans-serif;">You can now log in.</p>');
+    }
+  } catch (err) {
+    res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
+  }
+});
+// --------------------------------------------------
+
 // API ROUTES
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/players', playerRoutes);
