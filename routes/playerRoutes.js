@@ -40,6 +40,28 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// 🔥 QUARTERLY TREND (Player Specific)
+router.get('/:id/quarterly-trend', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.query(
+      `SELECT quarterly_cycle as label, overall_score as score, test_date 
+       FROM assessment_sessions 
+       WHERE user_id = $1 
+       ORDER BY test_date ASC`,
+      [id]
+    );
+
+    res.json(result.rows.map(row => ({
+      label: row.label || (row.test_date ? new Date(row.test_date).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }) : 'N/A'),
+      avg_score: Math.round(Number(row.score || 0))
+    })));
+  } catch (error) {
+    console.error(`[player-trend-q] Error for player ${req.params.id}:`, error.message);
+    res.json([]);
+  }
+});
+
 // 🔥 ADD PLAYER (Keep simple for now, can be expanded later)
 router.post('/', async (req, res) => {
   try {

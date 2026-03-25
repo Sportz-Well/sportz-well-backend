@@ -92,4 +92,26 @@ router.get('/trend', async (req, res) => {
   }
 });
 
+// 🔥 PLAYER TREND (Individual)
+router.get('/players/:id/trend', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const trendData = await analyticsService.getPlayerTrend(id);
+
+    res.json({
+      success: true,
+      data: trendData.map(row => ({
+        label: row.quarterly_cycle || (row.test_date ? new Date(row.test_date).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }) : 'N/A'),
+        avg_score: Math.round(row.score || 0)
+      }))
+    });
+  } catch (error) {
+    console.error(`[player-trend] Error for player ${req.params.id}:`, error.message);
+    res.json({
+      success: true,
+      data: []
+    });
+  }
+});
+
 module.exports = router;

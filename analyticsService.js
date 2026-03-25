@@ -39,6 +39,21 @@ class AnalyticsService {
 
     return result.rows;
   }
+
+  async getPlayerTrend(playerId) {
+    const query = `
+      SELECT 
+        test_date,
+        overall_score as score,
+        quarterly_cycle
+      FROM assessment_sessions
+      WHERE user_id = $1
+      ORDER BY test_date ASC
+    `;
+
+    const result = await this.db.query(query, [playerId]);
+    return result.rows;
+  }
 }
 
 module.exports = AnalyticsService;
