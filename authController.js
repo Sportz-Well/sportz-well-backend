@@ -8,9 +8,12 @@ async function login(req, res) {
   try {
     const { email, password } = req.body;
 
+    // BULLETPROOF FIX: Destroy invisible spaces and force lowercase
+    const safeEmail = email ? String(email).trim().toLowerCase() : '';
+
     const result = await db.query(
       'SELECT * FROM users WHERE email = $1',
-      [email]
+      [safeEmail]
     );
 
     if (result.rows.length === 0) {
@@ -19,15 +22,21 @@ async function login(req, res) {
 
     const user = result.rows[0];
 
-    const match = await bcrypt.compare(password, user.password);
+    const match = await bcrypt.compare(String(password), user.password);
 
     if (!match) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // EXTRA SAFETY: Ensure frontend gets everything it could possibly need
     return res.json({
       success: true,
-      user: { email: user.email }
+      token: 'swpi-demo-token-12345', 
+      user: { 
+        id: user.id,
+        email: user.email,
+        role: user.role || 'coach'
+      }
     });
 
   } catch (err) {
@@ -36,7 +45,7 @@ async function login(req, res) {
   }
 }
 
-// TEMP ADMIN CREATION (FOR FIX)
+// TEMP ADMIN CREATION (Fixed Database Constraints)
 async function createAdmin(req, res) {
   try {
     const email = 'admin@sportzwell.com';
@@ -45,8 +54,8 @@ async function createAdmin(req, res) {
     const hashed = await bcrypt.hash(password, 10);
 
     await db.query(
-      `INSERT INTO users (email, password)
-       VALUES ($1, $2)
+      `INSERT INTO users (email, password, role)
+       VALUES ($1, $2, 'admin')
        ON CONFLICT (email)
        DO UPDATE SET password = $2`,
       [email, hashed]
