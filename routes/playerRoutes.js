@@ -1,49 +1,57 @@
-﻿'use strict';
+'use strict';
 
 const express = require('express');
 const router = express.Router();
+const db = require('../db');
 
-const players = [
-  {
-    id: 1,
-    name: "Aarav Sharma",
-    age: 14,
-    gender: "Male",
-    role: "Batsman",
-    school_id: "SCH001",
-    aadhaar_no: "1234",
-    standard: "9",
-    division: "A"
-  },
-  {
-    id: 2,
-    name: "Riya Mehta",
-    age: 13,
-    gender: "Female",
-    role: "All-Rounder",
-    school_id: "SCH002",
-    aadhaar_no: "5678",
-    standard: "8",
-    division: "B"
+// 🔥 GET ALL PLAYERS (Filtered by School ID)
+router.get('/', async (req, res) => {
+  try {
+    const schoolId = 1; // Default for demo context
+    
+    // Ensure school_id matches the demo reset logic (integer 1)
+    const result = await db.query(
+      `SELECT * FROM players WHERE school_id = $1 ORDER BY name ASC`, 
+      [schoolId]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('[playerRoutes] Error fetching players:', error.message);
+    // Return empty array to prevent frontend crash
+    res.json([]);
   }
-];
-
-// 🔥 RETURN PURE ARRAY (CRITICAL FIX)
-router.get('/', (req, res) => {
-  res.json(players);
 });
 
-// 🔥 SINGLE PLAYER
-router.get('/:id', (req, res) => {
-  const player = players.find(p => p.id == req.params.id);
-  res.json(player);
+// 🔥 GET SINGLE PLAYER
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.query('SELECT * FROM players WHERE id = $1', [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Player not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error(`[playerRoutes] Error fetching player ${req.params.id}:`, error.message);
+    res.status(500).json({ error: 'Failed to fetch player details' });
+  }
 });
 
-// 🔥 ADD PLAYER (mock)
-router.post('/', (req, res) => {
-  res.json({
-    message: "Player added successfully"
-  });
+// 🔥 ADD PLAYER (Keep simple for now, can be expanded later)
+router.post('/', async (req, res) => {
+  try {
+    // This is a placeholder for actual player creation logic
+    // For now, we just return a success message
+    res.json({
+      message: "Player added successfully (Mock)"
+    });
+  } catch (error) {
+    console.error('[playerRoutes] Error adding player:', error.message);
+    res.status(500).json({ error: 'Failed to add player' });
+  }
 });
 
 module.exports = router;

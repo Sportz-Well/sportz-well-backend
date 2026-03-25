@@ -7,22 +7,41 @@ const AnalyticsService = require('../analyticsService');
 
 const analyticsService = new AnalyticsService(db);
 
-// 🔥 TEST ROUTE (keep it)
+// 🔥 TEST ROUTE
 router.get('/test', (req, res) => {
   res.json({
     message: 'NEW CODE DEPLOYED SUCCESSFULLY'
   });
 });
 
-// 🔥 DASHBOARD (USING DB)
+// 🔥 DASHBOARD (Explicitly filtered by school_id=1)
 router.get('/dashboard', async (req, res) => {
   try {
-    const schoolId = 1; // Default for demo
+    const schoolId = 1; // Default for demo context
+
+    // 1. Get Analytics (Avg Score)
     const stats = await analyticsService.getDashboardAnalytics(schoolId);
     
-    // Count total players and at-risk players
-    const playersRes = await db.query('SELECT COUNT(*) as count FROM players WHERE school_id = $1', [schoolId]);
-    const atRiskRes = await db.query('SELECT COUNT(*) as count FROM assessment_sessions WHERE school_id = $1 AND risk_status = $2 AND test_date = (SELECT MAX(test_date) FROM assessment_sessions WHERE school_id = $1)', [schoolId, 'At Risk']);
+    // 2. Count Total Players
+    const playersRes = await db.query(
+      'SELECT COUNT(*) as count FROM players WHERE school_id = $1', 
+      [schoolId]
+    );
+
+    // 3. Count At Risk Players (Latest assessment per player)
+    // We count distinct user_ids who had 'At Risk' status in their latest assessment
+    const atRiskRes = await db.query(`
+      SELECT COUNT(DISTINCT user_id) as count 
+      FROM assessment_sessions 
+      WHERE school_id = $1 
+        AND risk_status = 'At Risk' 
+        AND (user_id, test_date) IN (
+          SELECT user_id, MAX(test_date)
+          FROM assessment_sessions
+          WHERE school_id = $1
+          GROUP BY user_id
+        )
+    `, [schoolId]);
 
     res.json({
       success: true,
@@ -30,8 +49,10 @@ router.get('/dashboard', async (req, res) => {
       avg_score: Math.round(stats.average_score || 0),
       at_risk: Number(atRiskRes.rows[0]?.count || 0)
     });
+
   } catch (error) {
-    console.error('[dashboard] Error:', error.message);
+    console.error('[dashboard] Error fetching dashboard data:', error.message);
+    // Return safe defaults to prevent frontend crash
     res.json({
       success: true,
       total_players: 0,
@@ -41,10 +62,10 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
-// 🔥 TREND (WRAPPED IN TRY/CATCH)
+// 🔥 TREND (Explicitly filtered by school_id=1)
 router.get('/trend', async (req, res) => {
   try {
-    const schoolId = 1; // Default for demo
+    const schoolId = 1; // Default for demo context
     const trendData = await analyticsService.getSchoolTrend(schoolId);
 
     // Ensure we always return an array (even if empty) to prevent frontend map() crash
@@ -62,8 +83,9 @@ router.get('/trend', async (req, res) => {
         avg_score: Math.round(row.avg_score || 0)
       }))
     });
+
   } catch (error) {
-    console.error('[trend] Error:', error.message);
+    console.error('[trend] Error fetching trend data:', error.message);
     // CRITICAL: Return empty array to prevent data.map crash on frontend
     res.json({
       success: true,
