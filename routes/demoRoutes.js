@@ -68,12 +68,95 @@ function generateScores(isAtRisk, quarterIndex) {
   }
 }
 
+/**
+ * GOD MODE SCHEMA SYNC
+ * Ensures all tables and columns exist before insertion
+ */
+async function godModeSchemaSync(client) {
+  console.log('[GodMode] Starting Schema Sync...');
+
+  // 1. Ensure UUID Extension
+  await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
+
+  // 2. PLAYERS TABLE
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS players (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  
+  // Ensure all columns exist for players
+  const playerColumns = [
+    'name VARCHAR(255)',
+    'role VARCHAR(50)',
+    'gender VARCHAR(50)',
+    'dob DATE', // Date of Birth
+    'age INTEGER',
+    'std VARCHAR(50)',
+    'div VARCHAR(50)',
+    'school_id INTEGER DEFAULT 1',
+    'is_active BOOLEAN DEFAULT true',
+    'school_id_no VARCHAR(100)',
+    'aadhaar_card_no VARCHAR(100)'
+  ];
+
+  for (const colDef of playerColumns) {
+    // Extract column name (first word)
+    const colName = colDef.split(' ')[0];
+    await client.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS ${colDef};`);
+  }
+
+  // 3. ASSESSMENT SESSIONS TABLE
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS assessment_sessions (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Ensure all columns exist for assessment_sessions
+  const assessmentColumns = [
+    'user_id UUID',
+    'school_id INTEGER DEFAULT 1',
+    'quarterly_cycle VARCHAR(50)',
+    'test_date DATE',
+    'overall_score NUMERIC',
+    'improvement_pct NUMERIC',
+    'risk_status VARCHAR(50)',
+    'physical_score INTEGER',
+    'skill_score INTEGER',
+    'mental_score INTEGER',
+    'coach_score INTEGER',
+    'coach_feedback TEXT',
+    // Detailed skill scores
+    'speed_score NUMERIC',
+    'agility_score NUMERIC',
+    'batting_score NUMERIC',
+    'bowling_score NUMERIC',
+    'endurance_score NUMERIC',
+    'fielding_score NUMERIC',
+    'focus_score NUMERIC',
+    'discipline_score NUMERIC',
+    'game_awareness_score NUMERIC'
+  ];
+
+  for (const colDef of assessmentColumns) {
+    await client.query(`ALTER TABLE assessment_sessions ADD COLUMN IF NOT EXISTS ${colDef};`);
+  }
+
+  console.log('[GodMode] Schema Sync Complete.');
+}
+
 router.post('/reset', authMiddleware, async (req, res) => {
   const client = await db.connect();
   
   try {
     const schoolId = 1;
     await client.query('BEGIN');
+
+    // 🔥 RUN GOD MODE SYNC
+    await godModeSchemaSync(client);
 
     // Wipe old demo data
     await client.query('DELETE FROM assessment_sessions WHERE school_id = $1', [schoolId]);
@@ -118,12 +201,12 @@ router.post('/reset', authMiddleware, async (req, res) => {
     }
 
     await client.query('COMMIT');
-    res.json({ success: true, message: 'Demo reset successful with 15 players and 45 assessments.' });
+    res.json({ success: true, message: 'Demo reset successful with God Mode sync.' });
 
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('[demo/reset] Error:', error.message);
-    res.status(500).json({ error: 'Demo reset failed', details: error.message });
+    res.status(500).json({ error: 'Reset failed', details: error.message });
   } finally {
     client.release();
   }
