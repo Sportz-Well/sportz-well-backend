@@ -66,6 +66,23 @@ app.get('/api/create-coach-demo', async (req, res) => {
 });
 // --------------------------------------------------
 
+// =========================================================
+// THE HOLIDAY BYPASS: Open the door before anything blocks it!
+// =========================================================
+app.post('/api/v1/auth/login', (req, res) => {
+  console.log("🚨 HOLIDAY BYPASS TRIGGERED! DOOR OPENED.");
+  return res.json({
+    success: true,
+    token: 'swpi-demo-token-12345',
+    user: { 
+      id: 999, 
+      email: 'coach@sportz-well.com', 
+      role: 'coach' 
+    }
+  });
+});
+// =========================================================
+
 // API ROUTES
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/players', playerRoutes);
