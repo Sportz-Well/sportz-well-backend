@@ -43,43 +43,30 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// --- TEMPORARY BACKDOOR TO CREATE COACH ACCOUNT ---
-app.get('/api/create-coach-demo', async (req, res) => {
-  const bcrypt = require('bcrypt');
+// =========================================================
+// THE CLOUD BACKDOOR: FIX DATABASE SCHEMA
+// =========================================================
+app.get('/api/fix-db', async (req, res) => {
   const db = require('./db');
   try {
-    const email = 'coach@sportz-well.com';
-    const password = 'demo123';
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const existing = await db.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (existing.rows.length > 0) {
-      await db.query('UPDATE users SET password = $1 WHERE email = $2', [hashedPassword, email]);
-      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach password updated to demo123!</h1><p style="font-family:sans-serif;">You can now log in.</p>');
-    } else {
-      await db.query('INSERT INTO users (email, password, role) VALUES ($1, $2, $3)', [email, hashedPassword, 'coach']);
-      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach account created with demo123!</h1><p style="font-family:sans-serif;">You can now log in.</p>');
-    }
+    await db.query(`
+      ALTER TABLE players 
+      ADD COLUMN IF NOT EXISTS latest_score DECIMAL(5,1),
+      ADD COLUMN IF NOT EXISTS coach_signal VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS school_id_no VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS aadhaar_card_no VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS role VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS gender VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS std VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS div VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS age INTEGER,
+      ADD COLUMN IF NOT EXISTS dob DATE;
+    `);
+    res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Database Schema Healed!</h1><p style="font-family:sans-serif;">You can now go click the Reset Demo Data button.</p>');
   } catch (err) {
     res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
   }
-});
-// --------------------------------------------------
-
-// =========================================================
-// THE HOLIDAY BYPASS: Open the door before anything blocks it!
-// =========================================================
-app.post('/api/v1/auth/login', (req, res) => {
-  console.log("🚨 HOLIDAY BYPASS TRIGGERED! DOOR OPENED.");
-  return res.json({
-    success: true,
-    token: 'swpi-demo-token-12345',
-    user: { 
-      id: 999, 
-      email: 'coach@sportz-well.com', 
-      role: 'coach' 
-    }
-  });
 });
 // =========================================================
 
