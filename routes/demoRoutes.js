@@ -13,6 +13,25 @@ router.post('/reset', async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    // =========================================================
+    // CTO FIX: The "God Mode" Schema Auto-Healer
+    // Guarantee all columns exist before we insert data!
+    // =========================================================
+    await client.query(`
+      ALTER TABLE players 
+      ADD COLUMN IF NOT EXISTS latest_score DECIMAL(5,1),
+      ADD COLUMN IF NOT EXISTS coach_signal VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS school_id_no VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS aadhaar_card_no VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS role VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS gender VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS std VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS div VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS age INTEGER,
+      ADD COLUMN IF NOT EXISTS dob DATE;
+    `);
+
     // 1. Nuke all existing data to prevent duplicates
     await client.query('TRUNCATE TABLE assessment_sessions CASCADE');
     await client.query('TRUNCATE TABLE players CASCADE');
