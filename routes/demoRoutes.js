@@ -11,11 +11,9 @@ router.post('/reset', async (req, res) => {
   const client = await pool.connect();
   
   try {
-    await client.query('BEGIN');
-
     // =========================================================
-    // CTO FIX: The "God Mode" Schema Auto-Healer
-    // Guarantee all columns exist before we insert data!
+    // CTO FIX: THE SCHEMA HEALER (Run BEFORE the transaction)
+    // Guarantee columns physically exist in DB before moving on.
     // =========================================================
     await client.query(`
       ALTER TABLE players 
@@ -31,6 +29,11 @@ router.post('/reset', async (req, res) => {
       ADD COLUMN IF NOT EXISTS age INTEGER,
       ADD COLUMN IF NOT EXISTS dob DATE;
     `);
+
+    // =========================================================
+    // THE DATA WIPE & INSERT TRANSACTION
+    // =========================================================
+    await client.query('BEGIN');
 
     // 1. Nuke all existing data to prevent duplicates
     await client.query('TRUNCATE TABLE assessment_sessions CASCADE');
@@ -61,7 +64,6 @@ router.post('/reset', async (req, res) => {
     for (let i = 0; i < demoPlayers.length; i++) {
       const p = demoPlayers[i];
 
-      // Determine the mathematical fate of the player
       let baseScore, finalScore, signal;
       
       if (p.type === 'top') {
@@ -72,7 +74,6 @@ router.post('/reset', async (req, res) => {
          baseScore = 6.0; finalScore = 6.5; signal = 'Stable';
       }
 
-      // Insert Player and stamp their final score directly onto the master profile
       const playerRes = await client.query(`
         INSERT INTO players 
         (name, dob, age, std, div, school_id_no, aadhaar_card_no, role, gender, latest_score, coach_signal, school_id)
@@ -84,14 +85,12 @@ router.post('/reset', async (req, res) => {
 
       const playerId = playerRes.rows[0].id;
 
-      // Generate 4 Historical Quarters to draw the trend lines
       for (let q = 0; q < quarters.length; q++) {
          let qScore = baseScore;
          
-         // Create realistic trend lines on a 1-10 scale
-         if (p.type === 'top') qScore = baseScore + (q * 0.2); // Climbs from 8.8 to 9.4
-         if (p.type === 'risk') qScore = baseScore - (q * 0.6); // Plummets from 6.0 to 4.2
-         if (p.type === 'stable') qScore = baseScore + (q * 0.16); // Climbs slowly from 6.0 to 6.48
+         if (p.type === 'top') qScore = baseScore + (q * 0.2); 
+         if (p.type === 'risk') qScore = baseScore - (q * 0.6); 
+         if (p.type === 'stable') qScore = baseScore + (q * 0.16); 
 
          await client.query(`
            INSERT INTO assessment_sessions 
