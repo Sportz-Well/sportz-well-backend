@@ -44,26 +44,23 @@ app.get('/health', (_req, res) => {
 });
 
 // =========================================================
-// THE CLOUD BACKDOOR: FIX DATABASE SCHEMA
+// THE CLOUD BACKDOOR: UPGRADE TO DECIMAL SCALE
 // =========================================================
 app.get('/api/fix-db', async (req, res) => {
   const db = require('./db');
   try {
     await db.query(`
-      ALTER TABLE players 
-      ADD COLUMN IF NOT EXISTS latest_score DECIMAL(5,1),
-      ADD COLUMN IF NOT EXISTS coach_signal VARCHAR(50),
-      ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1,
-      ADD COLUMN IF NOT EXISTS school_id_no VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS aadhaar_card_no VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS role VARCHAR(50),
-      ADD COLUMN IF NOT EXISTS gender VARCHAR(50),
-      ADD COLUMN IF NOT EXISTS std VARCHAR(50),
-      ADD COLUMN IF NOT EXISTS div VARCHAR(50),
-      ADD COLUMN IF NOT EXISTS age INTEGER,
-      ADD COLUMN IF NOT EXISTS dob DATE;
+      ALTER TABLE assessment_sessions 
+      ALTER COLUMN physical_score TYPE DECIMAL(5,1) USING physical_score::numeric,
+      ALTER COLUMN skill_score TYPE DECIMAL(5,1) USING skill_score::numeric,
+      ALTER COLUMN mental_score TYPE DECIMAL(5,1) USING mental_score::numeric,
+      ALTER COLUMN coach_score TYPE DECIMAL(5,1) USING coach_score::numeric,
+      ALTER COLUMN overall_score TYPE DECIMAL(5,1) USING overall_score::numeric;
+
+      ALTER TABLE players
+      ALTER COLUMN latest_score TYPE DECIMAL(5,1) USING latest_score::numeric;
     `);
-    res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Database Schema Healed!</h1><p style="font-family:sans-serif;">You can now go click the Reset Demo Data button.</p>');
+    res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Database Upgraded to Decimals!</h1><p style="font-family:sans-serif;">You can now go click the Reset Demo Data button.</p>');
   } catch (err) {
     res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
   }
