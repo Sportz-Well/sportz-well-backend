@@ -63,25 +63,77 @@ app.get('/api/fix-db', async (req, res) => {
 });
 
 // =========================================================
-// CTO FIX: THE HOLIDAY BYPASS IS BACK!
-// Intercepts the login and forces the door open.
+// CTO UPGRADE: MULTI-TENANT DATABASE SCRIPT
+// =========================================================
+app.get('/api/upgrade-tenants', async (req, res) => {
+  const db = require('./db');
+  try {
+    // 1. Add academy_id to players table
+    await db.query(`
+      ALTER TABLE players 
+      ADD COLUMN IF NOT EXISTS academy_id VARCHAR(100) DEFAULT 'DEMO_ACADEMY';
+    `);
+
+    // 2. Add academy_id to assessment_sessions table
+    await db.query(`
+      ALTER TABLE assessment_sessions 
+      ADD COLUMN IF NOT EXISTS academy_id VARCHAR(100) DEFAULT 'DEMO_ACADEMY';
+    `);
+
+    // 3. Lock existing demo data to the demo academy
+    await db.query(`
+      UPDATE players SET academy_id = 'DEMO_ACADEMY' WHERE academy_id IS NULL;
+      UPDATE assessment_sessions SET academy_id = 'DEMO_ACADEMY' WHERE academy_id IS NULL;
+    `);
+
+    res.send('<h1 style="color:green;">✅ MULTI-TENANT DATABASE UPGRADE SUCCESSFUL</h1><p>Academy ID walls have been built in your PostgreSQL Database.</p>');
+  } catch (err) {
+    res.status(500).send('<h1 style="color:red;">❌ Error</h1><p>' + err.message + '</p>');
+  }
+});
+
+// =========================================================
+// CTO UPGRADE: SMART TENANT ROUTER
 // =========================================================
 app.post('/api/v1/auth/login', (req, res) => {
   const { email } = req.body;
+  const safeEmail = email ? email.toLowerCase() : 'coach@sportzwell.com';
   
-  // Smart detection: If you type admin, you get admin powers. Otherwise, coach.
-  const role = (email && email.includes('admin')) ? 'admin' : 'coach';
-  const safeEmail = email || 'coach@sportz-well.com';
+  let role = 'coach';
+  let academyId = 'DEMO_ACADEMY';
 
-  console.log(`🚨 HOLIDAY BYPASS TRIGGERED FOR: ${safeEmail} (Role: ${role})`);
+  // 1. Super Admin Routing
+  if (safeEmail.includes('admin')) {
+    role = 'admin';
+    academyId = 'ALL'; // Master Key
+  } 
+  // 2. Existing Demo Coach Routing
+  else if (safeEmail === 'coach@sportzwell.com' || safeEmail === 'coach@sportz-well.com') {
+    role = 'coach';
+    academyId = 'DEMO_ACADEMY';
+  } 
+  // 3. New Client Routing (Extracts domain dynamically)
+  else {
+    role = 'coach';
+    try {
+      const domain = safeEmail.split('@')[1];
+      const academyName = domain.split('.')[0].toUpperCase();
+      academyId = `${academyName}_ACADEMY`; // e.g., "DPS_ACADEMY"
+    } catch(e) {
+      academyId = 'DEMO_ACADEMY';
+    }
+  }
+
+  console.log(`🔐 LOGIN SUCCESS: ${safeEmail} | Role: ${role} | Tenant: ${academyId}`);
   
   return res.json({
     success: true,
-    token: 'swpi-demo-token-12345',
+    token: `swpi-token-${academyId}`, 
     user: {
       id: 999,
       email: safeEmail,
-      role: role
+      role: role,
+      academy_id: academyId
     }
   });
 });
@@ -97,7 +149,7 @@ app.use('/api/v1/admin', adminRoutes);
 
 // ROOT
 app.get('/', (_req, res) => {
-  res.send('Sportz-Well Backend Running');
+  res.send('Sportz-Well Backend Running (Multi-Tenant Active)');
 });
 
 // 404 HANDLER
