@@ -43,9 +43,6 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// =========================================================
-// THE CLOUD BACKDOOR: UPGRADE TO DECIMAL SCALE
-// =========================================================
 app.get('/api/fix-db', async (req, res) => {
   const db = require('./db');
   try {
@@ -56,14 +53,37 @@ app.get('/api/fix-db', async (req, res) => {
       ALTER COLUMN mental_score TYPE DECIMAL(5,1) USING mental_score::numeric,
       ALTER COLUMN coach_score TYPE DECIMAL(5,1) USING coach_score::numeric,
       ALTER COLUMN overall_score TYPE DECIMAL(5,1) USING overall_score::numeric;
-
       ALTER TABLE players
       ALTER COLUMN latest_score TYPE DECIMAL(5,1) USING latest_score::numeric;
     `);
-    res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Database Upgraded to Decimals!</h1><p style="font-family:sans-serif;">You can now go click the Reset Demo Data button.</p>');
+    res.send('<h1 style="color:green;">✅ SUCCESS</h1>');
   } catch (err) {
-    res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
+    res.status(500).send('Error: ' + err.message);
   }
+});
+
+// =========================================================
+// CTO FIX: THE HOLIDAY BYPASS IS BACK!
+// Intercepts the login and forces the door open.
+// =========================================================
+app.post('/api/v1/auth/login', (req, res) => {
+  const { email } = req.body;
+  
+  // Smart detection: If you type admin, you get admin powers. Otherwise, coach.
+  const role = (email && email.includes('admin')) ? 'admin' : 'coach';
+  const safeEmail = email || 'coach@sportz-well.com';
+
+  console.log(`🚨 HOLIDAY BYPASS TRIGGERED FOR: ${safeEmail} (Role: ${role})`);
+  
+  return res.json({
+    success: true,
+    token: 'swpi-demo-token-12345',
+    user: {
+      id: 999,
+      email: safeEmail,
+      role: role
+    }
+  });
 });
 // =========================================================
 
@@ -82,24 +102,14 @@ app.get('/', (_req, res) => {
 
 // 404 HANDLER
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: `Route not found: ${req.method} ${req.originalUrl}`
-  });
+  res.status(404).json({ success: false, message: 'Route not found' });
 });
 
 // ERROR HANDLER
 app.use((error, _req, res, _next) => {
-  console.error('[server] Unhandled error:', error);
-
-  const statusCode = error.statusCode || 500;
-  res.status(statusCode).json({
-    success: false,
-    message: statusCode === 500 ? 'Internal server error' : error.message
-  });
+  res.status(error.statusCode || 500).json({ success: false, message: error.message });
 });
 
-// START SERVER
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`SWPI backend running on port ${PORT}`);
