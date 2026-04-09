@@ -43,101 +43,63 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.get('/api/fix-db', async (req, res) => {
+// --- TEMPORARY BACKDOOR TO CREATE COACH ACCOUNT ---
+app.get('/api/create-coach-demo', async (req, res) => {
+  const bcrypt = require('bcrypt');
   const db = require('./db');
   try {
-    await db.query(`
-      ALTER TABLE assessment_sessions 
-      ALTER COLUMN physical_score TYPE DECIMAL(5,1) USING physical_score::numeric,
-      ALTER COLUMN skill_score TYPE DECIMAL(5,1) USING skill_score::numeric,
-      ALTER COLUMN mental_score TYPE DECIMAL(5,1) USING mental_score::numeric,
-      ALTER COLUMN coach_score TYPE DECIMAL(5,1) USING coach_score::numeric,
-      ALTER COLUMN overall_score TYPE DECIMAL(5,1) USING overall_score::numeric;
-      ALTER TABLE players
-      ALTER COLUMN latest_score TYPE DECIMAL(5,1) USING latest_score::numeric;
-    `);
-    res.send('<h1 style="color:green;">✅ SUCCESS</h1>');
+    const email = 'coach@sportz-well.com';
+    const password = 'demo123';
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const existing = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (existing.rows.length > 0) {
+      await db.query('UPDATE users SET password = $1 WHERE email = $2', [hashedPassword, email]);
+      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach password updated to demo123!</h1><p style="font-family:sans-serif;">You can now log in.</p>');
+    } else {
+      await db.query('INSERT INTO users (email, password, role) VALUES ($1, $2, $3)', [email, hashedPassword, 'coach']);
+      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach account created with demo123!</h1><p style="font-family:sans-serif;">You can now log in.</p>');
+    }
   } catch (err) {
-    res.status(500).send('Error: ' + err.message);
+    res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
   }
 });
+// --------------------------------------------------
 
-// =========================================================
-// CTO UPGRADE: MULTI-TENANT DATABASE SCRIPT
-// =========================================================
-app.get('/api/upgrade-tenants', async (req, res) => {
+// --- EMERGENCY PITCH BACKDOOR: FORCE POPULATE 10 PLAYERS ---
+app.get('/api/force-populate', async (req, res) => {
   const db = require('./db');
   try {
-    // 1. Add academy_id to players table
-    await db.query(`
-      ALTER TABLE players 
-      ADD COLUMN IF NOT EXISTS academy_id VARCHAR(100) DEFAULT 'DEMO_ACADEMY';
-    `);
+      console.log("--- INITIATING CLOUD BACKDOOR RESET ---");
+      await db.query('DELETE FROM players WHERE school_id = 1');
+      
+      const dummyPlayers = [
+          { name: 'Vihaan Shah', age: 10, dob: '2016-04-12', gender: 'Male', role: 'Batsman', score: 8.5, signal: 'Optimal' },
+          { name: 'Rohan Desai', age: 12, dob: '2014-08-22', gender: 'Male', role: 'Pace Bowler', score: 4.2, signal: 'At Risk' },
+          { name: 'Kabir Singh', age: 13, dob: '2013-11-10', gender: 'Male', role: 'All-Rounder', score: 6.8, signal: 'Stable' },
+          { name: 'Aryan Patel', age: 10, dob: '2016-07-04', gender: 'Male', role: 'Spin Bowler', score: 3.8, signal: 'At Risk' },
+          { name: 'Dhruv Joshi', age: 12, dob: '2014-02-28', gender: 'Male', role: 'Wicket Keeper', score: 7.5, signal: 'Optimal' },
+          { name: 'Manjiri Wadke', age: 13, dob: '2013-09-12', gender: 'Female', role: 'Top Order Batter', score: 7.2, signal: 'Stable' },
+          { name: 'Sara Gupte', age: 12, dob: '2014-03-18', gender: 'Female', role: 'Spinner', score: 4.5, signal: 'At Risk' },
+          { name: 'Priya Iyer', age: 10, dob: '2016-12-05', gender: 'Female', role: 'All-Rounder', score: 8.1, signal: 'Optimal' },
+          { name: 'Neha Reddy', age: 13, dob: '2013-04-25', gender: 'Female', role: 'Pace Bowler', score: 6.5, signal: 'Stable' },
+          { name: 'Ananya Sharma', age: 12, dob: '2014-01-30', gender: 'Female', role: 'Wicket Keeper', score: 7.8, signal: 'Optimal' }
+      ];
 
-    // 2. Add academy_id to assessment_sessions table
-    await db.query(`
-      ALTER TABLE assessment_sessions 
-      ADD COLUMN IF NOT EXISTS academy_id VARCHAR(100) DEFAULT 'DEMO_ACADEMY';
-    `);
-
-    // 3. Lock existing demo data to the demo academy
-    await db.query(`
-      UPDATE players SET academy_id = 'DEMO_ACADEMY' WHERE academy_id IS NULL;
-      UPDATE assessment_sessions SET academy_id = 'DEMO_ACADEMY' WHERE academy_id IS NULL;
-    `);
-
-    res.send('<h1 style="color:green;">✅ MULTI-TENANT DATABASE UPGRADE SUCCESSFUL</h1><p>Academy ID walls have been built in your PostgreSQL Database.</p>');
+      for (let p of dummyPlayers) {
+          await db.query(
+              `INSERT INTO players (school_id, name, age, date_of_birth, gender, role, latest_score, coach_signal, std, div, school_id_no, aadhaar_card_no)
+               VALUES (1, $1, $2, $3, $4, $5, $6, $7, '8', 'A', 'SID-000', '0000-0000-0000')`,
+              [p.name, p.age, p.dob, p.gender, p.role, p.score, p.signal]
+          );
+      }
+      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: 10 Players Injected!</h1><p style="font-family:sans-serif;">Go refresh your Vercel Dashboard.</p>');
   } catch (err) {
-    res.status(500).send('<h1 style="color:red;">❌ Error</h1><p>' + err.message + '</p>');
+      console.error('Backdoor Reset Error:', err);
+      res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
   }
 });
-
-// =========================================================
-// CTO UPGRADE: SMART TENANT ROUTER
-// =========================================================
-app.post('/api/v1/auth/login', (req, res) => {
-  const { email } = req.body;
-  const safeEmail = email ? email.toLowerCase() : 'coach@sportzwell.com';
-  
-  let role = 'coach';
-  let academyId = 'DEMO_ACADEMY';
-
-  // 1. Super Admin Routing
-  if (safeEmail.includes('admin')) {
-    role = 'admin';
-    academyId = 'ALL'; // Master Key
-  } 
-  // 2. Existing Demo Coach Routing
-  else if (safeEmail === 'coach@sportzwell.com' || safeEmail === 'coach@sportz-well.com') {
-    role = 'coach';
-    academyId = 'DEMO_ACADEMY';
-  } 
-  // 3. New Client Routing (Extracts domain dynamically)
-  else {
-    role = 'coach';
-    try {
-      const domain = safeEmail.split('@')[1];
-      const academyName = domain.split('.')[0].toUpperCase();
-      academyId = `${academyName}_ACADEMY`; // e.g., "DPS_ACADEMY"
-    } catch(e) {
-      academyId = 'DEMO_ACADEMY';
-    }
-  }
-
-  console.log(`🔐 LOGIN SUCCESS: ${safeEmail} | Role: ${role} | Tenant: ${academyId}`);
-  
-  return res.json({
-    success: true,
-    token: `swpi-token-${academyId}`, 
-    user: {
-      id: 999,
-      email: safeEmail,
-      role: role,
-      academy_id: academyId
-    }
-  });
-});
-// =========================================================
+// -----------------------------------------------------------
 
 // API ROUTES
 app.use('/api/v1/auth', authRoutes);
@@ -149,19 +111,28 @@ app.use('/api/v1/admin', adminRoutes);
 
 // ROOT
 app.get('/', (_req, res) => {
-  res.send('Sportz-Well Backend Running (Multi-Tenant Active)');
+  res.send('Sportz-Well Backend Running');
 });
 
 // 404 HANDLER
 app.use((req, res) => {
-  res.status(404).json({ success: false, message: 'Route not found' });
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.originalUrl}`
+  });
 });
 
 // ERROR HANDLER
 app.use((error, _req, res, _next) => {
-  res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  console.error('[server] Unhandled error:', error);
+  const statusCode = error.statusCode || 500;
+  res.status(statusCode).json({
+    success: false,
+    message: statusCode === 500 ? 'Internal server error' : error.message
+  });
 });
 
+// START SERVER
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`SWPI backend running on port ${PORT}`);
