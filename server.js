@@ -55,18 +55,18 @@ app.get('/api/create-coach-demo', async (req, res) => {
     const existing = await db.query('SELECT * FROM users WHERE email = $1', [email]);
     if (existing.rows.length > 0) {
       await db.query('UPDATE users SET password = $1 WHERE email = $2', [hashedPassword, email]);
-      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach password updated to demo123!</h1><p style="font-family:sans-serif;">You can now log in.</p>');
+      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach password updated!</h1>');
     } else {
       await db.query('INSERT INTO users (email, password, role) VALUES ($1, $2, $3)', [email, hashedPassword, 'coach']);
-      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach account created with demo123!</h1><p style="font-family:sans-serif;">You can now log in.</p>');
+      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach account created!</h1>');
     }
   } catch (err) {
-    res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
+    res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p>' + err.message + '</p>');
   }
 });
 // --------------------------------------------------
 
-// --- EMERGENCY PITCH BACKDOOR: FORCE POPULATE 10 PLAYERS ---
+// --- EMERGENCY PITCH BACKDOOR: FORCE POPULATE 10 PLAYERS (U12, U14, U16) ---
 app.get('/api/force-populate', async (req, res) => {
   const db = require('./db');
   try {
@@ -74,16 +74,21 @@ app.get('/api/force-populate', async (req, res) => {
       await db.query('DELETE FROM players WHERE school_id = 1');
       
       const dummyPlayers = [
-          { name: 'Vihaan Shah', age: 10, dob: '2016-04-12', gender: 'Male', role: 'Batsman', score: 8.5, signal: 'Optimal' },
-          { name: 'Rohan Desai', age: 12, dob: '2014-08-22', gender: 'Male', role: 'Pace Bowler', score: 4.2, signal: 'At Risk' },
-          { name: 'Kabir Singh', age: 13, dob: '2013-11-10', gender: 'Male', role: 'All-Rounder', score: 6.8, signal: 'Stable' },
-          { name: 'Aryan Patel', age: 10, dob: '2016-07-04', gender: 'Male', role: 'Spin Bowler', score: 3.8, signal: 'At Risk' },
-          { name: 'Dhruv Joshi', age: 12, dob: '2014-02-28', gender: 'Male', role: 'Wicket Keeper', score: 7.5, signal: 'Optimal' },
-          { name: 'Manjiri Wadke', age: 13, dob: '2013-09-12', gender: 'Female', role: 'Top Order Batter', score: 7.2, signal: 'Stable' },
-          { name: 'Sara Gupte', age: 12, dob: '2014-03-18', gender: 'Female', role: 'Spinner', score: 4.5, signal: 'At Risk' },
-          { name: 'Priya Iyer', age: 10, dob: '2016-12-05', gender: 'Female', role: 'All-Rounder', score: 8.1, signal: 'Optimal' },
-          { name: 'Neha Reddy', age: 13, dob: '2013-04-25', gender: 'Female', role: 'Pace Bowler', score: 6.5, signal: 'Stable' },
-          { name: 'Ananya Sharma', age: 12, dob: '2014-01-30', gender: 'Female', role: 'Wicket Keeper', score: 7.8, signal: 'Optimal' }
+          // U12 SQUAD (3 Players)
+          { name: 'Vihaan Shah', age: 10, dob: '2015-05-10', gender: 'Male', role: 'Batsman', score: 8.5, signal: 'Optimal' },
+          { name: 'Rohan Desai', age: 11, dob: '2014-08-20', gender: 'Male', role: 'Pace Bowler', score: 4.2, signal: 'At Risk' },
+          { name: 'Manjiri Wadke', age: 11, dob: '2014-11-05', gender: 'Female', role: 'Top Order Batter', score: 7.2, signal: 'Stable' },
+          
+          // U14 SQUAD (3 Players)
+          { name: 'Kabir Singh', age: 13, dob: '2013-02-15', gender: 'Male', role: 'All-Rounder', score: 6.8, signal: 'Stable' },
+          { name: 'Sara Gupte', age: 13, dob: '2012-09-10', gender: 'Female', role: 'Spinner', score: 4.5, signal: 'At Risk' },
+          { name: 'Dhruv Joshi', age: 12, dob: '2013-12-01', gender: 'Male', role: 'Wicket Keeper', score: 7.5, signal: 'Optimal' },
+
+          // U16 SQUAD (4 Players)
+          { name: 'Aryan Patel', age: 14, dob: '2011-07-14', gender: 'Male', role: 'Spin Bowler', score: 3.8, signal: 'At Risk' },
+          { name: 'Priya Iyer', age: 15, dob: '2010-12-25', gender: 'Female', role: 'All-Rounder', score: 8.1, signal: 'Optimal' },
+          { name: 'Neha Reddy', age: 14, dob: '2011-04-18', gender: 'Female', role: 'Pace Bowler', score: 6.5, signal: 'Stable' },
+          { name: 'Ananya Sharma', age: 15, dob: '2010-08-30', gender: 'Female', role: 'Wicket Keeper', score: 7.8, signal: 'Optimal' }
       ];
 
       for (let p of dummyPlayers) {
@@ -93,7 +98,7 @@ app.get('/api/force-populate', async (req, res) => {
               [p.name, p.age, p.dob, p.gender, p.role, p.score, p.signal]
           );
       }
-      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: 10 Players Injected!</h1><p style="font-family:sans-serif;">Go refresh your Vercel Dashboard.</p>');
+      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: 10 Players (U12, U14, U16) Injected!</h1><p style="font-family:sans-serif;">Go refresh your Vercel Dashboard.</p>');
   } catch (err) {
       console.error('Backdoor Reset Error:', err);
       res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
