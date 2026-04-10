@@ -56,6 +56,17 @@ app.get('/api/create-coach-demo', async (req, res) => {
         { email: 'admin@sportzwell.com', role: 'admin' }
     ];
 
+    // Ensure users table exists just in case
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            email VARCHAR(255) UNIQUE NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            role VARCHAR(50),
+            school_id INTEGER DEFAULT 1
+        );
+    `);
+
     for (let acc of accounts) {
         const existing = await db.query('SELECT * FROM users WHERE email = $1', [acc.email]);
         if (existing.rows.length > 0) {
@@ -71,15 +82,17 @@ app.get('/api/create-coach-demo', async (req, res) => {
 });
 // --------------------------------------------------
 
-// --- EMERGENCY PITCH BACKDOOR: DROP, REBUILD, & POPULATE ---
+// --- EMERGENCY PITCH BACKDOOR: DROP, REBUILD, & POPULATE BOTH TABLES ---
 app.get('/api/force-populate', async (req, res) => {
   const db = require('./db');
   try {
       console.log("--- INITIATING FULL DATABASE REBUILD ---");
       
-      // 1. NUCLEAR OPTION: Drop the table completely and rebuild it perfectly
+      // 1. NUCLEAR OPTION: Drop both tables to ensure a clean slate
+      await db.query(`DROP TABLE IF EXISTS assessments CASCADE;`);
       await db.query(`DROP TABLE IF EXISTS players CASCADE;`);
       
+      // 2. REBUILD PLAYERS TABLE
       await db.query(`
         CREATE TABLE players (
             id SERIAL PRIMARY KEY,
@@ -100,19 +113,30 @@ app.get('/api/force-populate', async (req, res) => {
         );
       `);
 
-      // 2. INJECT EXACTLY 10 PLAYERS (U12, U14, U16)
+      // 3. REBUILD ASSESSMENTS TABLE
+      await db.query(`
+        CREATE TABLE assessments (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES players(id) ON DELETE CASCADE,
+            school_id INTEGER DEFAULT 1,
+            quarter VARCHAR(50),
+            physical_score NUMERIC(4,2),
+            skill_score NUMERIC(4,2),
+            mental_score NUMERIC(4,2),
+            coach_score NUMERIC(4,2),
+            total_score NUMERIC(4,2),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      // 4. INJECT EXACTLY 10 PLAYERS (U12, U14, U16)
       const dummyPlayers = [
-          // U12 SQUAD (3 Players)
           { name: 'Vihaan Shah', age: 10, dob: '2015-05-10', gender: 'Male', role: 'Batsman', score: 8.5, signal: 'Optimal' },
           { name: 'Rohan Desai', age: 11, dob: '2014-08-20', gender: 'Male', role: 'Pace Bowler', score: 4.2, signal: 'At Risk' },
           { name: 'Manjiri Wadke', age: 11, dob: '2014-11-05', gender: 'Female', role: 'Top Order Batter', score: 7.2, signal: 'Stable' },
-          
-          // U14 SQUAD (3 Players)
           { name: 'Kabir Singh', age: 13, dob: '2013-02-15', gender: 'Male', role: 'All-Rounder', score: 6.8, signal: 'Stable' },
           { name: 'Sara Gupte', age: 13, dob: '2012-09-10', gender: 'Female', role: 'Spinner', score: 4.5, signal: 'At Risk' },
           { name: 'Dhruv Joshi', age: 12, dob: '2013-12-01', gender: 'Male', role: 'Wicket Keeper', score: 7.5, signal: 'Optimal' },
-
-          // U16 SQUAD (4 Players)
           { name: 'Aryan Patel', age: 14, dob: '2011-07-14', gender: 'Male', role: 'Spin Bowler', score: 3.8, signal: 'At Risk' },
           { name: 'Priya Iyer', age: 15, dob: '2010-12-25', gender: 'Female', role: 'All-Rounder', score: 8.1, signal: 'Optimal' },
           { name: 'Neha Reddy', age: 14, dob: '2011-04-18', gender: 'Female', role: 'Pace Bowler', score: 6.5, signal: 'Stable' },
