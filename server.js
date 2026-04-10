@@ -43,36 +43,64 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// --- EMERGENCY PITCH BACKDOOR: SELF-HEALING & FORCE POPULATE ---
+// --- TEMPORARY BACKDOOR TO CREATE COACH & ADMIN ACCOUNTS ---
+app.get('/api/create-coach-demo', async (req, res) => {
+  const bcrypt = require('bcrypt');
+  const db = require('./db');
+  try {
+    const password = 'demo123';
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const accounts = [
+        { email: 'coach@sportzwell.com', role: 'coach' },
+        { email: 'admin@sportzwell.com', role: 'admin' }
+    ];
+
+    for (let acc of accounts) {
+        const existing = await db.query('SELECT * FROM users WHERE email = $1', [acc.email]);
+        if (existing.rows.length > 0) {
+          await db.query('UPDATE users SET password = $1 WHERE email = $2', [hashedPassword, acc.email]);
+        } else {
+          await db.query('INSERT INTO users (email, password, role) VALUES ($1, $2, $3)', [acc.email, hashedPassword, acc.role]);
+        }
+    }
+    res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Coach & Admin accounts active!</h1><p style="font-family:sans-serif;">Password is: demo123</p>');
+  } catch (err) {
+    res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
+  }
+});
+// --------------------------------------------------
+
+// --- EMERGENCY PITCH BACKDOOR: DROP, REBUILD, & POPULATE ---
 app.get('/api/force-populate', async (req, res) => {
   const db = require('./db');
   try {
-      console.log("--- INITIATING SELF-HEALING BACKDOOR ---");
+      console.log("--- INITIATING FULL DATABASE REBUILD ---");
       
-      // 1. AUTO-FIX SCHEMA: Add missing columns dynamically
-      const alterQueries = [
-          'ALTER TABLE players ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(50);',
-          'ALTER TABLE players ADD COLUMN IF NOT EXISTS dob VARCHAR(50);',
-          'ALTER TABLE players ADD COLUMN IF NOT EXISTS std VARCHAR(50);',
-          'ALTER TABLE players ADD COLUMN IF NOT EXISTS div VARCHAR(50);',
-          'ALTER TABLE players ADD COLUMN IF NOT EXISTS school_id_no VARCHAR(100);',
-          'ALTER TABLE players ADD COLUMN IF NOT EXISTS aadhaar_card_no VARCHAR(100);',
-          'ALTER TABLE players ADD COLUMN IF NOT EXISTS age INTEGER;'
-      ];
-
-      for (let query of alterQueries) {
-          try {
-              await db.query(query);
-          } catch (e) {
-              // Ignore standard constraint errors if syntax differs slightly per Postgres version
-              console.log("Column check passed/ignored.");
-          }
-      }
-
-      // 2. WIPE EXISTING DEMO ROSTER
-      await db.query('DELETE FROM players WHERE school_id = 1');
+      // 1. NUCLEAR OPTION: Drop the table completely and rebuild it perfectly
+      await db.query(`DROP TABLE IF EXISTS players CASCADE;`);
       
-      // 3. INJECT EXACTLY 10 PLAYERS (U12, U14, U16)
+      await db.query(`
+        CREATE TABLE players (
+            id SERIAL PRIMARY KEY,
+            school_id INTEGER DEFAULT 1,
+            name VARCHAR(255) NOT NULL,
+            age INTEGER,
+            date_of_birth VARCHAR(50),
+            dob VARCHAR(50),
+            gender VARCHAR(50),
+            role VARCHAR(100),
+            latest_score NUMERIC(4,2),
+            coach_signal VARCHAR(50),
+            std VARCHAR(50),
+            div VARCHAR(50),
+            school_id_no VARCHAR(100),
+            aadhaar_card_no VARCHAR(100),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      // 2. INJECT EXACTLY 10 PLAYERS (U12, U14, U16)
       const dummyPlayers = [
           // U12 SQUAD (3 Players)
           { name: 'Vihaan Shah', age: 10, dob: '2015-05-10', gender: 'Male', role: 'Batsman', score: 8.5, signal: 'Optimal' },
@@ -92,17 +120,16 @@ app.get('/api/force-populate', async (req, res) => {
       ];
 
       for (let p of dummyPlayers) {
-          // Fallback to storing in 'dob' as well to prevent legacy conflicts
           await db.query(
               `INSERT INTO players (school_id, name, age, date_of_birth, dob, gender, role, latest_score, coach_signal, std, div, school_id_no, aadhaar_card_no)
                VALUES (1, $1, $2, $3, $3, $4, $5, $6, $7, '8', 'A', 'SID-000', '0000-0000-0000')`,
               [p.name, p.age, p.dob, p.gender, p.role, p.score, p.signal]
           );
       }
-      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Database Healed & 10 Players Injected!</h1><p style="font-family:sans-serif;">Go refresh your Vercel Dashboard.</p>');
+      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Database Rebuilt & 10 Players Injected!</h1><p style="font-family:sans-serif;">You can now log into your dashboard.</p>');
   } catch (err) {
       console.error('Backdoor Reset Error:', err);
-      res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '<br><br>Please check server logs.</p>');
+      res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
   }
 });
 // -----------------------------------------------------------
