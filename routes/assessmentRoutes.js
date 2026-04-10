@@ -7,21 +7,28 @@ const pool = require('../db');
 router.post('/', async (req, res) => {
     const client = await pool.connect();
     try {
-        const { assessments, quarter, school_id } = req.body;
-        const sid = school_id || 1;
-        const qtr = quarter || 'Q1 2026';
+        // SMART PAYLOAD PARSING: Accept the data however the frontend sends it
+        let assessments = req.body.assessments;
+        let quarter = req.body.quarter || 'Q1 2026';
+        let sid = req.body.school_id || 1;
 
-        if (!assessments || !Array.isArray(assessments)) {
-            return res.status(400).json({ success: false, message: "Invalid assessment data" });
+        // Failsafe: If the frontend sent the array directly as the body
+        if (Array.isArray(req.body)) {
+            assessments = req.body;
+        }
+
+        if (!assessments || !Array.isArray(assessments) || assessments.length === 0) {
+            return res.status(400).json({ success: false, message: "Invalid assessment data. No data received." });
         }
 
         await client.query('BEGIN'); // Start transaction
 
         for (let act of assessments) {
-            // Handle different frontend payload ID names securely
-            const playerId = act.playerId || act.id; 
+            // Handle different frontend ID names
+            const playerId = act.playerId || act.id || act.player_id; 
             
-            // Auto-calculate the total average score
+            if (!playerId) continue; // Skip empty rows safely
+
             const physical = Number(act.physical) || 0;
             const skill = Number(act.skill) || 0;
             const mental = Number(act.mental) || 0;
@@ -29,19 +36,18 @@ router.post('/', async (req, res) => {
             
             const totalScore = ((physical + skill + mental + coach) / 4).toFixed(1);
             
-            // Auto-calculate the AI Signal based on the score
             let signal = 'Stable';
             if (totalScore >= 7.5) signal = 'Optimal';
             else if (totalScore < 5.0) signal = 'At Risk';
 
-            // 1. Insert into assessments table using our newly upgraded schema
+            // 1. Insert into assessments table
             await client.query(
                 `INSERT INTO assessments (user_id, school_id, quarter, physical_score, skill_score, mental_score, coach_score, total_score)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-                [playerId, sid, qtr, physical, skill, mental, coach, totalScore]
+                [playerId, sid, quarter, physical, skill, mental, coach, totalScore]
             );
 
-            // 2. Update the players table with the latest score and signal
+            // 2. Update the players table
             await client.query(
                 `UPDATE players SET latest_score = $1, coach_signal = $2 WHERE id = $3`,
                 [totalScore, signal, playerId]
