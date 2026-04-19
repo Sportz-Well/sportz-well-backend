@@ -3,6 +3,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const db = require('./db'); // Injected DB requirement for Attendance Route
 
 // ROUTES
 const playerRoutes = require('./routes/playerRoutes');
@@ -46,7 +47,6 @@ app.get('/health', (_req, res) => {
 // --- TEMPORARY BACKDOOR TO CREATE COACH & ADMIN ACCOUNTS ---
 app.get('/api/create-coach-demo', async (req, res) => {
   const bcrypt = require('bcrypt');
-  const db = require('./db');
   try {
     const password = 'demo123';
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -84,7 +84,6 @@ app.get('/api/create-coach-demo', async (req, res) => {
 
 // --- EMERGENCY PITCH BACKDOOR: DROP, REBUILD, & POPULATE BOTH TABLES ---
 app.get('/api/force-populate', async (req, res) => {
-  const db = require('./db');
   try {
       console.log("--- INITIATING FULL DATABASE REBUILD ---");
       
@@ -157,6 +156,42 @@ app.get('/api/force-populate', async (req, res) => {
   }
 });
 // -----------------------------------------------------------
+
+
+// ==========================================================
+// PHASE 2: NEW ATTENDANCE ROUTE
+// ==========================================================
+app.post('/api/attendance', async (req, res) => {
+    const { school_id, date, attendance_data } = req.body;
+    
+    // Quick validation to ensure we have data
+    if (!school_id || !date || !attendance_data || attendance_data.length === 0) {
+        return res.status(400).json({ error: "Missing required attendance data." });
+    }
+
+    try {
+        await db.query('BEGIN'); // Start a transaction
+
+        // Loop through each player's toggle status and save it
+        for (const record of attendance_data) {
+            await db.query(
+                `INSERT INTO daily_attendance (player_id, school_id, date, status)
+                 VALUES ($1, $2, $3, $4)`,
+                [record.player_id, school_id, date, record.status]
+            );
+        }
+
+        await db.query('COMMIT'); // Lock the data in
+        res.status(200).json({ message: "Attendance saved successfully!" });
+
+    } catch (err) {
+        await db.query('ROLLBACK'); // If something fails, cancel the save
+        console.error("Database Error saving attendance:", err);
+        res.status(500).json({ error: "Failed to save attendance." });
+    }
+});
+// ==========================================================
+
 
 // API ROUTES
 app.use('/api/v1/auth', authRoutes);
