@@ -3,7 +3,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const db = require('./db'); // Injected DB requirement for Attendance Route
+const db = require('./db'); 
 
 // ROUTES
 const playerRoutes = require('./routes/playerRoutes');
@@ -56,7 +56,6 @@ app.get('/api/create-coach-demo', async (req, res) => {
         { email: 'admin@sportzwell.com', role: 'admin' }
     ];
 
-    // Ensure users table exists just in case
     await db.query(`
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -80,18 +79,14 @@ app.get('/api/create-coach-demo', async (req, res) => {
     res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
   }
 });
-// --------------------------------------------------
 
 // --- EMERGENCY PITCH BACKDOOR: DROP, REBUILD, & POPULATE BOTH TABLES ---
 app.get('/api/force-populate', async (req, res) => {
   try {
       console.log("--- INITIATING FULL DATABASE REBUILD ---");
-      
-      // 1. NUCLEAR OPTION: Drop both tables to ensure a clean slate
       await db.query(`DROP TABLE IF EXISTS assessments CASCADE;`);
       await db.query(`DROP TABLE IF EXISTS players CASCADE;`);
       
-      // 2. REBUILD PLAYERS TABLE
       await db.query(`
         CREATE TABLE players (
             id SERIAL PRIMARY KEY,
@@ -112,7 +107,6 @@ app.get('/api/force-populate', async (req, res) => {
         );
       `);
 
-      // 3. REBUILD ASSESSMENTS TABLE
       await db.query(`
         CREATE TABLE assessments (
             id SERIAL PRIMARY KEY,
@@ -128,18 +122,11 @@ app.get('/api/force-populate', async (req, res) => {
         );
       `);
 
-      // 4. INJECT EXACTLY 10 PLAYERS (U12, U14, U16)
       const dummyPlayers = [
           { name: 'Vihaan Shah', age: 10, dob: '2015-05-10', gender: 'Male', role: 'Batsman', score: 8.5, signal: 'Optimal' },
           { name: 'Rohan Desai', age: 11, dob: '2014-08-20', gender: 'Male', role: 'Pace Bowler', score: 4.2, signal: 'At Risk' },
           { name: 'Manjiri Wadke', age: 11, dob: '2014-11-05', gender: 'Female', role: 'Top Order Batter', score: 7.2, signal: 'Stable' },
-          { name: 'Kabir Singh', age: 13, dob: '2013-02-15', gender: 'Male', role: 'All-Rounder', score: 6.8, signal: 'Stable' },
-          { name: 'Sara Gupte', age: 13, dob: '2012-09-10', gender: 'Female', role: 'Spinner', score: 4.5, signal: 'At Risk' },
-          { name: 'Dhruv Joshi', age: 12, dob: '2013-12-01', gender: 'Male', role: 'Wicket Keeper', score: 7.5, signal: 'Optimal' },
-          { name: 'Aryan Patel', age: 14, dob: '2011-07-14', gender: 'Male', role: 'Spin Bowler', score: 3.8, signal: 'At Risk' },
-          { name: 'Priya Iyer', age: 15, dob: '2010-12-25', gender: 'Female', role: 'All-Rounder', score: 8.1, signal: 'Optimal' },
-          { name: 'Neha Reddy', age: 14, dob: '2011-04-18', gender: 'Female', role: 'Pace Bowler', score: 6.5, signal: 'Stable' },
-          { name: 'Ananya Sharma', age: 15, dob: '2010-08-30', gender: 'Female', role: 'Wicket Keeper', score: 7.8, signal: 'Optimal' }
+          { name: 'Kabir Singh', age: 13, dob: '2013-02-15', gender: 'Male', role: 'All-Rounder', score: 6.8, signal: 'Stable' }
       ];
 
       for (let p of dummyPlayers) {
@@ -149,49 +136,60 @@ app.get('/api/force-populate', async (req, res) => {
               [p.name, p.age, p.dob, p.gender, p.role, p.score, p.signal]
           );
       }
-      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Database Rebuilt & 10 Players Injected!</h1><p style="font-family:sans-serif;">You can now log into your dashboard.</p>');
+      res.send('<h1 style="color:green; font-family:sans-serif;">✅ SUCCESS: Database Rebuilt!</h1>');
   } catch (err) {
-      console.error('Backdoor Reset Error:', err);
       res.status(500).send('<h1 style="color:red; font-family:sans-serif;">❌ Error</h1><p style="font-family:sans-serif;">' + err.message + '</p>');
   }
 });
-// -----------------------------------------------------------
-
 
 // ==========================================================
-// PHASE 2: NEW ATTENDANCE ROUTE
+// PHASE 2: ATTENDANCE ROUTE
 // ==========================================================
 app.post('/api/attendance', async (req, res) => {
     const { school_id, date, attendance_data } = req.body;
-    
-    // Quick validation to ensure we have data
     if (!school_id || !date || !attendance_data || attendance_data.length === 0) {
         return res.status(400).json({ error: "Missing required attendance data." });
     }
-
     try {
-        await db.query('BEGIN'); // Start a transaction
-
-        // Loop through each player's toggle status and save it
+        await db.query('BEGIN');
         for (const record of attendance_data) {
             await db.query(
-                `INSERT INTO daily_attendance (player_id, school_id, date, status)
-                 VALUES ($1, $2, $3, $4)`,
+                `INSERT INTO daily_attendance (player_id, school_id, date, status) VALUES ($1, $2, $3, $4)`,
                 [record.player_id, school_id, date, record.status]
             );
         }
-
-        await db.query('COMMIT'); // Lock the data in
+        await db.query('COMMIT');
         res.status(200).json({ message: "Attendance saved successfully!" });
-
     } catch (err) {
-        await db.query('ROLLBACK'); // If something fails, cancel the save
+        await db.query('ROLLBACK');
         console.error("Database Error saving attendance:", err);
         res.status(500).json({ error: "Failed to save attendance." });
     }
 });
-// ==========================================================
 
+// ==========================================================
+// PHASE 2: NEW WEEKLY MICRO-ASSESSMENT ROUTE
+// ==========================================================
+app.post('/api/weekly-assessment', async (req, res) => {
+    const { school_id, player_id, assessment_date, physical_score, technical_score, mental_score } = req.body;
+
+    if (!school_id || !player_id || !assessment_date) {
+        return res.status(400).json({ error: "Missing required assessment data." });
+    }
+
+    try {
+        await db.query(
+            `INSERT INTO weekly_assessments (player_id, school_id, assessment_date, physical_score, technical_score, mental_score)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [player_id, school_id, assessment_date, physical_score, technical_score, mental_score]
+        );
+        res.status(200).json({ message: "Weekly assessment saved successfully!" });
+    } catch (err) {
+        console.error("Database Error saving weekly assessment:", err);
+        res.status(500).json({ error: "Failed to save weekly assessment." });
+    }
+});
+// ==========================================================
 
 // API ROUTES
 app.use('/api/v1/auth', authRoutes);
@@ -206,29 +204,15 @@ app.get('/', (_req, res) => {
   res.send('Sportz-Well Backend Running');
 });
 
-// 404 HANDLER
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: `Route not found: ${req.method} ${req.originalUrl}`
-  });
-});
-
-// ERROR HANDLER
+// 404 & ERROR HANDLERS
+app.use((req, res) => { res.status(404).json({ success: false, message: 'Route not found' }); });
 app.use((error, _req, res, _next) => {
-  console.error('[server] Unhandled error:', error);
   const statusCode = error.statusCode || 500;
-  res.status(statusCode).json({
-    success: false,
-    message: statusCode === 500 ? 'Internal server error' : error.message
-  });
+  res.status(statusCode).json({ success: false, message: error.message });
 });
 
-// START SERVER
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`SWPI backend running on port ${PORT}`);
-  });
+  app.listen(PORT, () => { console.log(`SWPI backend running on port ${PORT}`); });
 }
 
 module.exports = app;
