@@ -11,20 +11,22 @@ const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 
 // ==========================================================
-// DATABASE AUTO-PATCH (Adds Bowling Stats seamlessly)
+// DATABASE AUTO-PATCH 2 (Adds Fielding & Not Out tracking)
 // ==========================================================
 db.query(`
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS overs_bowled NUMERIC(4,1) DEFAULT 0;
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS wickets INTEGER DEFAULT 0;
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS runs_conceded INTEGER DEFAULT 0;
-`).then(() => console.log("✅ DB Auto-Patched: Bowling stats ready."))
+    ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS not_out BOOLEAN DEFAULT false;
+    ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS catches INTEGER DEFAULT 0;
+    ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS stumpings INTEGER DEFAULT 0;
+    ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS run_outs INTEGER DEFAULT 0;
+`).then(() => console.log("✅ DB Auto-Patched: Fielding & Match stats ready."))
   .catch(err => console.error("Auto-patch error:", err));
 // ==========================================================
 
 // CORS CONFIG
-const corsOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
-  : '*';
+const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()) : '*';
 
 app.disable('x-powered-by');
 
@@ -46,10 +48,7 @@ const demoRoutes = require('./routes/demoRoutes');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 
-// HEALTH CHECK
-app.get('/health', (_req, res) => {
-  res.status(200).json({ success: true, message: 'SWPI API is running' });
-});
+app.get('/health', (_req, res) => { res.status(200).json({ success: true, message: 'SWPI API is running' }); });
 
 // --- TEMPORARY BACKDOOR TO CREATE COACH & ADMIN ACCOUNTS ---
 app.get('/api/create-coach-demo', async (req, res) => {
@@ -76,15 +75,11 @@ app.get('/api/create-coach-demo', async (req, res) => {
   }
 });
 
-// --- EMERGENCY BACKDOOR ---
 app.get('/api/force-populate', async (req, res) => {
-    // (Keeping your original backdoor logic intact for safety)
     res.send('<h1 style="color:orange;">Backdoor active but skipped for safety during Phase 2.</h1>');
 });
 
-// ==========================================================
 // PHASE 2: ATTENDANCE ROUTE
-// ==========================================================
 app.post('/api/attendance', async (req, res) => {
     const { school_id, date, attendance_data } = req.body;
     if (!school_id || !date || !attendance_data || attendance_data.length === 0) return res.status(400).json({ error: "Missing data." });
@@ -101,9 +96,7 @@ app.post('/api/attendance', async (req, res) => {
     }
 });
 
-// ==========================================================
 // PHASE 2: WEEKLY MICRO-ASSESSMENT ROUTE
-// ==========================================================
 app.post('/api/weekly-assessment', async (req, res) => {
     const { school_id, player_id, assessment_date, physical_score, technical_score, mental_score } = req.body;
     if (!school_id || !player_id || !assessment_date) return res.status(400).json({ error: "Missing data." });
@@ -119,20 +112,29 @@ app.post('/api/weekly-assessment', async (req, res) => {
 });
 
 // ==========================================================
-// PHASE 2: UPDATED MATCH LOG ROUTE (Now with Bowling!)
+// PHASE 2: MATCH LOG ROUTE (Now with Fielding & Not Out)
 // ==========================================================
 app.post('/api/match-log', async (req, res) => {
-    const { school_id, player_id, match_date, tournament_name, runs, balls_faced, fours, sixes, overs_bowled, wickets, runs_conceded } = req.body;
+    const { 
+        school_id, player_id, match_date, tournament_name, 
+        runs, balls_faced, fours, sixes, not_out, 
+        overs_bowled, wickets, runs_conceded,
+        catches, stumpings, run_outs 
+    } = req.body;
     
-    if (!school_id || !player_id || !match_date) {
-        return res.status(400).json({ error: "Missing required match data." });
-    }
+    if (!school_id || !player_id || !match_date) return res.status(400).json({ error: "Missing required match data." });
 
     try {
         await db.query(
-            `INSERT INTO match_logs (player_id, school_id, match_date, tournament_name, runs, balls_faced, fours, sixes, overs_bowled, wickets, runs_conceded)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-            [player_id, school_id, match_date, tournament_name, runs || 0, balls_faced || 0, fours || 0, sixes || 0, overs_bowled || 0, wickets || 0, runs_conceded || 0]
+            `INSERT INTO match_logs 
+            (player_id, school_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+            [
+                player_id, school_id, match_date, tournament_name, 
+                runs || 0, balls_faced || 0, fours || 0, sixes || 0, not_out || false, 
+                overs_bowled || 0, wickets || 0, runs_conceded || 0,
+                catches || 0, stumpings || 0, run_outs || 0
+            ]
         );
         res.status(200).json({ message: "Match logged successfully!" });
     } catch (err) {
@@ -140,7 +142,6 @@ app.post('/api/match-log', async (req, res) => {
         res.status(500).json({ error: "Failed to log match." });
     }
 });
-// ==========================================================
 
 // API ROUTES
 app.use('/api/v1/auth', authRoutes);
