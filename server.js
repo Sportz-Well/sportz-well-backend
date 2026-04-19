@@ -168,15 +168,13 @@ app.post('/api/attendance', async (req, res) => {
 });
 
 // ==========================================================
-// PHASE 2: NEW WEEKLY MICRO-ASSESSMENT ROUTE
+// PHASE 2: WEEKLY MICRO-ASSESSMENT ROUTE
 // ==========================================================
 app.post('/api/weekly-assessment', async (req, res) => {
     const { school_id, player_id, assessment_date, physical_score, technical_score, mental_score } = req.body;
-
     if (!school_id || !player_id || !assessment_date) {
         return res.status(400).json({ error: "Missing required assessment data." });
     }
-
     try {
         await db.query(
             `INSERT INTO weekly_assessments (player_id, school_id, assessment_date, physical_score, technical_score, mental_score)
@@ -187,6 +185,29 @@ app.post('/api/weekly-assessment', async (req, res) => {
     } catch (err) {
         console.error("Database Error saving weekly assessment:", err);
         res.status(500).json({ error: "Failed to save weekly assessment." });
+    }
+});
+
+// ==========================================================
+// PHASE 2: NEW MATCH LOG ROUTE
+// ==========================================================
+app.post('/api/match-log', async (req, res) => {
+    const { school_id, player_id, match_date, tournament_name, runs, balls_faced, fours, sixes } = req.body;
+    
+    if (!school_id || !player_id || !match_date) {
+        return res.status(400).json({ error: "Missing required match data." });
+    }
+
+    try {
+        await db.query(
+            `INSERT INTO match_logs (player_id, school_id, match_date, tournament_name, runs, balls_faced, fours, sixes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [player_id, school_id, match_date, tournament_name, runs || 0, balls_faced || 0, fours || 0, sixes || 0]
+        );
+        res.status(200).json({ message: "Match logged successfully!" });
+    } catch (err) {
+        console.error("Database Error saving match log:", err);
+        res.status(500).json({ error: "Failed to log match." });
     }
 });
 // ==========================================================
