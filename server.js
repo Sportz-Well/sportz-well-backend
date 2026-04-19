@@ -111,9 +111,7 @@ app.post('/api/weekly-assessment', async (req, res) => {
     }
 });
 
-// ==========================================================
-// PHASE 2: MATCH LOG ROUTE (Now with Fielding & Not Out)
-// ==========================================================
+// PHASE 2: MATCH LOG ROUTE
 app.post('/api/match-log', async (req, res) => {
     const { 
         school_id, player_id, match_date, tournament_name, 
@@ -142,6 +140,30 @@ app.post('/api/match-log', async (req, res) => {
         res.status(500).json({ error: "Failed to log match." });
     }
 });
+
+// ==========================================================
+// PHASE 2: COACH REMARKS ROUTE
+// ==========================================================
+app.post('/api/coach-remarks', async (req, res) => {
+    const { school_id, player_id, remark_date, notes } = req.body;
+    
+    if (!school_id || !player_id || !remark_date || !notes) {
+        return res.status(400).json({ error: "Missing required remark data." });
+    }
+
+    try {
+        await db.query(
+            `INSERT INTO coach_remarks (player_id, school_id, remark_date, notes)
+             VALUES ($1, $2, $3, $4)`,
+            [player_id, school_id, remark_date, notes]
+        );
+        res.status(200).json({ message: "Remark saved successfully!" });
+    } catch (err) {
+        console.error("Database Error saving remark:", err);
+        res.status(500).json({ error: "Failed to save remark." });
+    }
+});
+// ==========================================================
 
 // API ROUTES
 app.use('/api/v1/auth', authRoutes);
