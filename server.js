@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const db = require('./db'); 
-const { GoogleGenerativeAI } = require('@google/generative-ai'); // NEW: Gemini SDK
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 dotenv.config();
 
@@ -12,7 +12,7 @@ const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 
 // ==========================================================
-// DATABASE AUTO-PATCH
+// DATABASE AUTO-PATCH 3 (Adds Video Logs Table)
 // ==========================================================
 db.query(`
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS overs_bowled NUMERIC(4,1) DEFAULT 0;
@@ -22,11 +22,20 @@ db.query(`
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS catches INTEGER DEFAULT 0;
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS stumpings INTEGER DEFAULT 0;
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS run_outs INTEGER DEFAULT 0;
-`).then(() => console.log("✅ DB Auto-Patched: Fielding & Match stats ready."))
+
+    CREATE TABLE IF NOT EXISTS video_logs (
+        id SERIAL PRIMARY KEY,
+        player_id INTEGER REFERENCES players(id) ON DELETE CASCADE,
+        school_id INTEGER DEFAULT 1,
+        upload_date VARCHAR(50),
+        video_url TEXT,
+        technical_notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+`).then(() => console.log("✅ DB Auto-Patched: Video Logs ready."))
   .catch(err => console.error("Auto-patch error:", err));
 // ==========================================================
 
-// CORS CONFIG
 const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()) : '*';
 
 app.disable('x-powered-by');
@@ -51,7 +60,7 @@ const adminRoutes = require('./routes/adminRoutes');
 
 app.get('/health', (_req, res) => { res.status(200).json({ success: true, message: 'SWPI API is running' }); });
 
-// PHASE 2: ATTENDANCE ROUTE
+// PHASE 2 ROUTES
 app.post('/api/attendance', async (req, res) => {
     const { school_id, date, attendance_data } = req.body;
     if (!school_id || !date || !attendance_data || attendance_data.length === 0) return res.status(400).json({ error: "Missing data." });
@@ -68,7 +77,6 @@ app.post('/api/attendance', async (req, res) => {
     }
 });
 
-// PHASE 2: WEEKLY MICRO-ASSESSMENT ROUTE
 app.post('/api/weekly-assessment', async (req, res) => {
     const { school_id, player_id, assessment_date, physical_score, technical_score, mental_score } = req.body;
     if (!school_id || !player_id || !assessment_date) return res.status(400).json({ error: "Missing data." });
@@ -83,61 +91,72 @@ app.post('/api/weekly-assessment', async (req, res) => {
     }
 });
 
-// PHASE 2: MATCH LOG ROUTE 
 app.post('/api/match-log', async (req, res) => {
-    const { 
-        school_id, player_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, 
-        overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs 
-    } = req.body;
-    if (!school_id || !player_id || !match_date) return res.status(400).json({ error: "Missing required match data." });
+    const { school_id, player_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs } = req.body;
+    if (!school_id || !player_id || !match_date) return res.status(400).json({ error: "Missing match data." });
     try {
         await db.query(
-            `INSERT INTO match_logs (player_id, school_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+            `INSERT INTO match_logs (player_id, school_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
             [player_id, school_id, match_date, tournament_name, runs || 0, balls_faced || 0, fours || 0, sixes || 0, not_out || false, overs_bowled || 0, wickets || 0, runs_conceded || 0, catches || 0, stumpings || 0, run_outs || 0]
         );
-        res.status(200).json({ message: "Match logged successfully!" });
+        res.status(200).json({ message: "Match logged!" });
     } catch (err) {
         res.status(500).json({ error: "Failed to log match." });
     }
 });
 
-// PHASE 2: COACH REMARKS ROUTE
 app.post('/api/coach-remarks', async (req, res) => {
     const { school_id, player_id, remark_date, notes } = req.body;
-    if (!school_id || !player_id || !remark_date || !notes) return res.status(400).json({ error: "Missing required remark data." });
+    if (!school_id || !player_id || !remark_date || !notes) return res.status(400).json({ error: "Missing remark data." });
     try {
         await db.query(`INSERT INTO coach_remarks (player_id, school_id, remark_date, notes) VALUES ($1, $2, $3, $4)`, [player_id, school_id, remark_date, notes]);
-        res.status(200).json({ message: "Remark saved successfully!" });
+        res.status(200).json({ message: "Remark saved!" });
     } catch (err) {
         res.status(500).json({ error: "Failed to save remark." });
     }
 });
 
 // ==========================================================
-// PHASE 2: NEW AI REPORT GENERATOR ROUTE
+// PHASE 2: NEW VIDEO LOG ROUTE
 // ==========================================================
+app.post('/api/video-log', async (req, res) => {
+    const { school_id, player_id, upload_date, video_url, technical_notes } = req.body;
+    
+    if (!school_id || !player_id || !upload_date || !video_url) {
+        return res.status(400).json({ error: "Missing required video data." });
+    }
+
+    try {
+        await db.query(
+            `INSERT INTO video_logs (player_id, school_id, upload_date, video_url, technical_notes)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [player_id, school_id, upload_date, video_url, technical_notes]
+        );
+        res.status(200).json({ message: "Video analysis saved successfully!" });
+    } catch (err) {
+        console.error("Database Error saving video log:", err);
+        res.status(500).json({ error: "Failed to log video." });
+    }
+});
+// ==========================================================
+
+// PHASE 2: AI REPORT GENERATOR
 app.post('/api/generate-ai-report', async (req, res) => {
     const { player_id } = req.body;
     if (!player_id) return res.status(400).json({ error: "Missing player_id" });
 
     try {
-        // 1. Fetch Player Data
         const playerRes = await db.query('SELECT name, role FROM players WHERE id = $1', [player_id]);
         if (playerRes.rows.length === 0) return res.status(404).json({ error: "Player not found" });
         const player = playerRes.rows[0];
 
-        // 2. Fetch Last 10 Matches
         const matchesRes = await db.query('SELECT * FROM match_logs WHERE player_id = $1 ORDER BY match_date DESC LIMIT 10', [player_id]);
         const matches = matchesRes.rows;
 
-        // 3. Fetch Coach Remarks
         const remarksRes = await db.query('SELECT notes FROM coach_remarks WHERE player_id = $1 ORDER BY remark_date DESC LIMIT 5', [player_id]);
         const coachNotes = remarksRes.rows.map(r => r.notes).join(' | ');
 
-        // 4. Calculate Hard Math (Averages & Economy)
-        let totalRuns = 0; let dismissals = 0;
-        let totalRunsConceded = 0; let totalOvers = 0; let totalWickets = 0;
+        let totalRuns = 0; let dismissals = 0; let totalRunsConceded = 0; let totalOvers = 0; let totalWickets = 0;
         
         matches.forEach(m => {
             totalRuns += Number(m.runs || 0);
@@ -150,7 +169,6 @@ app.post('/api/generate-ai-report', async (req, res) => {
         const batAvg = dismissals > 0 ? (totalRuns / dismissals).toFixed(2) : (totalRuns > 0 ? `${totalRuns} (Undefeated)` : "0.00");
         const ecoRate = totalOvers > 0 ? (totalRunsConceded / totalOvers).toFixed(2) : "0.00";
 
-        // 5. Ask Gemini to write the Report
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
@@ -183,10 +201,9 @@ app.post('/api/generate-ai-report', async (req, res) => {
 
     } catch (err) {
         console.error("AI Gen Error:", err);
-        res.status(500).json({ error: "Failed to generate AI report. Check server logs." });
+        res.status(500).json({ error: "Failed to generate AI report." });
     }
 });
-// ==========================================================
 
 // API ROUTES
 app.use('/api/v1/auth', authRoutes);
@@ -197,7 +214,6 @@ app.use('/api/v1/demo', demoRoutes);
 app.use('/api/v1/admin', adminRoutes);
 
 app.get('/', (_req, res) => { res.send('Sportz-Well Backend Running'); });
-
 app.use((req, res) => { res.status(404).json({ success: false, message: 'Route not found' }); });
 app.use((error, _req, res, _next) => {
   const statusCode = error.statusCode || 500;
