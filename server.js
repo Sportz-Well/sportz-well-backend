@@ -171,7 +171,7 @@ app.post('/api/generate-ai-report', async (req, res) => {
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         
         // FIX 2: Set strictly to 'gemini-pro' for 100% API compatibility
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
         const prompt = `
         You are an elite cricket high-performance coach writing a monthly report for the parents of ${player.name}.
