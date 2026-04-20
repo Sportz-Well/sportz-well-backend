@@ -137,14 +137,15 @@ app.post('/api/video-log', async (req, res) => {
 });
 
 // ==========================================================
-// SWPI ADVANCED ANALYTICS ENGINE
+// SWPI ADVANCED ANALYTICS ENGINE (DOUBLE-BARREL FIX)
 // ==========================================================
 app.post('/api/generate-ai-report', async (req, res) => {
     const { player_id } = req.body;
     if (!player_id) return res.status(400).json({ error: "Missing player_id" });
 
     try {
-        const playerRes = await db.query('SELECT name, role FROM players WHERE id = $1', [player_id]);
+        // FIX 1: Removed 'role' from query to prevent DB crashes
+        const playerRes = await db.query('SELECT name FROM players WHERE id = $1', [player_id]);
         if (playerRes.rows.length === 0) return res.status(404).json({ error: "Player not found" });
         const player = playerRes.rows[0];
 
@@ -168,10 +169,12 @@ app.post('/api/generate-ai-report', async (req, res) => {
         const ecoRate = totalOvers > 0 ? (totalRunsConceded / totalOvers).toFixed(2) : "0.00";
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        
+        // FIX 2: Set strictly to 'gemini-pro' for 100% API compatibility
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
         const prompt = `
-        You are an elite cricket high-performance coach writing a monthly report for the parents of ${player.name} (Role: ${player.role}).
+        You are an elite cricket high-performance coach writing a monthly report for the parents of ${player.name}.
         
         Hard Data (Last ${matches.length} matches):
         - Batting Average: ${batAvg}
