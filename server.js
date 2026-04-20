@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const db = require('./db'); 
+const { GoogleGenerativeAI } = require('@google/generative-ai'); // NEW: Gemini SDK
 
 dotenv.config();
 
@@ -11,7 +12,7 @@ const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 
 // ==========================================================
-// DATABASE AUTO-PATCH 2 (Adds Fielding & Not Out tracking)
+// DATABASE AUTO-PATCH
 // ==========================================================
 db.query(`
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS overs_bowled NUMERIC(4,1) DEFAULT 0;
@@ -50,35 +51,6 @@ const adminRoutes = require('./routes/adminRoutes');
 
 app.get('/health', (_req, res) => { res.status(200).json({ success: true, message: 'SWPI API is running' }); });
 
-// --- TEMPORARY BACKDOOR TO CREATE COACH & ADMIN ACCOUNTS ---
-app.get('/api/create-coach-demo', async (req, res) => {
-  const bcrypt = require('bcrypt');
-  try {
-    const password = 'demo123';
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const accounts = [
-        { email: 'coach@sportzwell.com', role: 'coach' },
-        { email: 'admin@sportzwell.com', role: 'admin' }
-    ];
-    await db.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, role VARCHAR(50), school_id INTEGER DEFAULT 1);`);
-    for (let acc of accounts) {
-        const existing = await db.query('SELECT * FROM users WHERE email = $1', [acc.email]);
-        if (existing.rows.length > 0) {
-          await db.query('UPDATE users SET password = $1 WHERE email = $2', [hashedPassword, acc.email]);
-        } else {
-          await db.query('INSERT INTO users (email, password, role) VALUES ($1, $2, $3)', [acc.email, hashedPassword, acc.role]);
-        }
-    }
-    res.send('<h1 style="color:green;">✅ SUCCESS: Accounts active!</h1><p>Password: demo123</p>');
-  } catch (err) {
-    res.status(500).send('<h1 style="color:red;">❌ Error</h1><p>' + err.message + '</p>');
-  }
-});
-
-app.get('/api/force-populate', async (req, res) => {
-    res.send('<h1 style="color:orange;">Backdoor active but skipped for safety during Phase 2.</h1>');
-});
-
 // PHASE 2: ATTENDANCE ROUTE
 app.post('/api/attendance', async (req, res) => {
     const { school_id, date, attendance_data } = req.body;
@@ -111,56 +83,107 @@ app.post('/api/weekly-assessment', async (req, res) => {
     }
 });
 
-// PHASE 2: MATCH LOG ROUTE
+// PHASE 2: MATCH LOG ROUTE 
 app.post('/api/match-log', async (req, res) => {
     const { 
-        school_id, player_id, match_date, tournament_name, 
-        runs, balls_faced, fours, sixes, not_out, 
-        overs_bowled, wickets, runs_conceded,
-        catches, stumpings, run_outs 
+        school_id, player_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, 
+        overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs 
     } = req.body;
-    
     if (!school_id || !player_id || !match_date) return res.status(400).json({ error: "Missing required match data." });
-
     try {
         await db.query(
-            `INSERT INTO match_logs 
-            (player_id, school_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs)
+            `INSERT INTO match_logs (player_id, school_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-            [
-                player_id, school_id, match_date, tournament_name, 
-                runs || 0, balls_faced || 0, fours || 0, sixes || 0, not_out || false, 
-                overs_bowled || 0, wickets || 0, runs_conceded || 0,
-                catches || 0, stumpings || 0, run_outs || 0
-            ]
+            [player_id, school_id, match_date, tournament_name, runs || 0, balls_faced || 0, fours || 0, sixes || 0, not_out || false, overs_bowled || 0, wickets || 0, runs_conceded || 0, catches || 0, stumpings || 0, run_outs || 0]
         );
         res.status(200).json({ message: "Match logged successfully!" });
     } catch (err) {
-        console.error("Database Error saving match log:", err);
         res.status(500).json({ error: "Failed to log match." });
     }
 });
 
-// ==========================================================
 // PHASE 2: COACH REMARKS ROUTE
-// ==========================================================
 app.post('/api/coach-remarks', async (req, res) => {
     const { school_id, player_id, remark_date, notes } = req.body;
-    
-    if (!school_id || !player_id || !remark_date || !notes) {
-        return res.status(400).json({ error: "Missing required remark data." });
-    }
-
+    if (!school_id || !player_id || !remark_date || !notes) return res.status(400).json({ error: "Missing required remark data." });
     try {
-        await db.query(
-            `INSERT INTO coach_remarks (player_id, school_id, remark_date, notes)
-             VALUES ($1, $2, $3, $4)`,
-            [player_id, school_id, remark_date, notes]
-        );
+        await db.query(`INSERT INTO coach_remarks (player_id, school_id, remark_date, notes) VALUES ($1, $2, $3, $4)`, [player_id, school_id, remark_date, notes]);
         res.status(200).json({ message: "Remark saved successfully!" });
     } catch (err) {
-        console.error("Database Error saving remark:", err);
         res.status(500).json({ error: "Failed to save remark." });
+    }
+});
+
+// ==========================================================
+// PHASE 2: NEW AI REPORT GENERATOR ROUTE
+// ==========================================================
+app.post('/api/generate-ai-report', async (req, res) => {
+    const { player_id } = req.body;
+    if (!player_id) return res.status(400).json({ error: "Missing player_id" });
+
+    try {
+        // 1. Fetch Player Data
+        const playerRes = await db.query('SELECT name, role FROM players WHERE id = $1', [player_id]);
+        if (playerRes.rows.length === 0) return res.status(404).json({ error: "Player not found" });
+        const player = playerRes.rows[0];
+
+        // 2. Fetch Last 10 Matches
+        const matchesRes = await db.query('SELECT * FROM match_logs WHERE player_id = $1 ORDER BY match_date DESC LIMIT 10', [player_id]);
+        const matches = matchesRes.rows;
+
+        // 3. Fetch Coach Remarks
+        const remarksRes = await db.query('SELECT notes FROM coach_remarks WHERE player_id = $1 ORDER BY remark_date DESC LIMIT 5', [player_id]);
+        const coachNotes = remarksRes.rows.map(r => r.notes).join(' | ');
+
+        // 4. Calculate Hard Math (Averages & Economy)
+        let totalRuns = 0; let dismissals = 0;
+        let totalRunsConceded = 0; let totalOvers = 0; let totalWickets = 0;
+        
+        matches.forEach(m => {
+            totalRuns += Number(m.runs || 0);
+            if (!m.not_out) dismissals += 1;
+            totalRunsConceded += Number(m.runs_conceded || 0);
+            totalOvers += Number(m.overs_bowled || 0);
+            totalWickets += Number(m.wickets || 0);
+        });
+
+        const batAvg = dismissals > 0 ? (totalRuns / dismissals).toFixed(2) : (totalRuns > 0 ? `${totalRuns} (Undefeated)` : "0.00");
+        const ecoRate = totalOvers > 0 ? (totalRunsConceded / totalOvers).toFixed(2) : "0.00";
+
+        // 5. Ask Gemini to write the Report
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+        const prompt = `
+        You are an elite cricket high-performance coach writing a monthly report for the parents of ${player.name} (Role: ${player.role}).
+        
+        Hard Data (Last ${matches.length} matches):
+        - Batting Average: ${batAvg}
+        - Bowling Economy Rate: ${ecoRate}
+        - Total Wickets: ${totalWickets}
+        
+        Coach's Subjective Remarks: "${coachNotes || 'No recent remarks.'}"
+        
+        Write a professional, encouraging 3-paragraph report. 
+        Paragraph 1: Summarize their statistical match form.
+        Paragraph 2: Perform a sentiment analysis on the coach's remarks regarding their mental focus and technique.
+        Paragraph 3: Create a specific 3-step "Action Plan" of drills for them to work on next month.
+        Do not use markdown like asterisks or bold text, just plain text with line breaks.
+        `;
+
+        const result = await model.generateContent(prompt);
+        const aiReportText = result.response.text();
+
+        res.status(200).json({
+            success: true,
+            player_name: player.name,
+            calculated_stats: { batAvg, ecoRate, totalWickets, matches_played: matches.length },
+            ai_report: aiReportText
+        });
+
+    } catch (err) {
+        console.error("AI Gen Error:", err);
+        res.status(500).json({ error: "Failed to generate AI report. Check server logs." });
     }
 });
 // ==========================================================
