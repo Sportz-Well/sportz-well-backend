@@ -116,9 +116,6 @@ app.post('/api/coach-remarks', async (req, res) => {
     }
 });
 
-// ==========================================================
-// PHASE 2: NEW VIDEO LOG ROUTE
-// ==========================================================
 app.post('/api/video-log', async (req, res) => {
     const { school_id, player_id, upload_date, video_url, technical_notes } = req.body;
     
@@ -138,9 +135,10 @@ app.post('/api/video-log', async (req, res) => {
         res.status(500).json({ error: "Failed to log video." });
     }
 });
-// ==========================================================
 
-// PHASE 2: AI REPORT GENERATOR
+// ==========================================================
+// PHASE 2: AI REPORT GENERATOR (Fixed Model Version)
+// ==========================================================
 app.post('/api/generate-ai-report', async (req, res) => {
     const { player_id } = req.body;
     if (!player_id) return res.status(400).json({ error: "Missing player_id" });
@@ -170,7 +168,8 @@ app.post('/api/generate-ai-report', async (req, res) => {
         const ecoRate = totalOvers > 0 ? (totalRunsConceded / totalOvers).toFixed(2) : "0.00";
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // FIXED: Switched to gemini-pro for maximum universal compatibility
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
         const prompt = `
         You are an elite cricket high-performance coach writing a monthly report for the parents of ${player.name} (Role: ${player.role}).
