@@ -137,7 +137,7 @@ app.post('/api/video-log', async (req, res) => {
 });
 
 // ==========================================================
-// PHASE 2: AI REPORT GENERATOR (Fixed Model Version)
+// SWPI ADVANCED ANALYTICS ENGINE
 // ==========================================================
 app.post('/api/generate-ai-report', async (req, res) => {
     const { player_id } = req.body;
@@ -168,8 +168,7 @@ app.post('/api/generate-ai-report', async (req, res) => {
         const ecoRate = totalOvers > 0 ? (totalRunsConceded / totalOvers).toFixed(2) : "0.00";
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        // FIXED: Switched to gemini-pro for maximum universal compatibility
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         const prompt = `
         You are an elite cricket high-performance coach writing a monthly report for the parents of ${player.name} (Role: ${player.role}).
@@ -200,7 +199,7 @@ app.post('/api/generate-ai-report', async (req, res) => {
 
     } catch (err) {
         console.error("AI Gen Error:", err);
-        res.status(500).json({ error: "Failed to generate AI report." });
+        res.status(500).json({ error: "Failed to generate advanced analytics report." });
     }
 });
 
