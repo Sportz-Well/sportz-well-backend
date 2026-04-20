@@ -1,4 +1,4 @@
-'use strict';    
+'use strict';
 
 const express = require('express');
 const cors = require('cors');
@@ -12,7 +12,7 @@ const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 
 // ==========================================================
-// DATABASE AUTO-PATCH 3 (Adds Video Logs Table)
+// DATABASE AUTO-PATCH
 // ==========================================================
 db.query(`
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS overs_bowled NUMERIC(4,1) DEFAULT 0;
@@ -137,14 +137,13 @@ app.post('/api/video-log', async (req, res) => {
 });
 
 // ==========================================================
-// SWPI ADVANCED ANALYTICS ENGINE (DOUBLE-BARREL FIX)
+// SWPI ADVANCED ANALYTICS ENGINE 
 // ==========================================================
 app.post('/api/generate-ai-report', async (req, res) => {
     const { player_id } = req.body;
     if (!player_id) return res.status(400).json({ error: "Missing player_id" });
 
     try {
-        // FIX 1: Removed 'role' from query to prevent DB crashes
         const playerRes = await db.query('SELECT name FROM players WHERE id = $1', [player_id]);
         if (playerRes.rows.length === 0) return res.status(404).json({ error: "Player not found" });
         const player = playerRes.rows[0];
@@ -169,9 +168,8 @@ app.post('/api/generate-ai-report', async (req, res) => {
         const ecoRate = totalOvers > 0 ? (totalRunsConceded / totalOvers).toFixed(2) : "0.00";
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        
-        // FIX 2: Set strictly to 'gemini-pro' for 100% API compatibility
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        // GOLDEN KEY MODEL SETUP
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         const prompt = `
         You are an elite cricket high-performance coach writing a monthly report for the parents of ${player.name}.
