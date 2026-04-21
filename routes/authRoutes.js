@@ -11,24 +11,28 @@ router.post('/login', async (req, res) => {
 
         // 1. HARDCODED DEMO BYPASS (Failsafe for Pitch)
         if ((email === 'coach@sportzwell.com' || email === 'admin@sportzwell.com') && password === 'demo123') {
-            const role = email.includes('admin') ? 'admin' : 'coach';
+            const role = email.includes('admin') ? 'admin' : 'head_coach';
+            
+            // Admin gets global access (0), Coach defaults to Singhania (1)
+            const academy_id = role === 'admin' ? 0 : 1; 
+
             // Sign a token valid for 24 hours
             const token = jwt.sign(
-                { email, role, school_id: 1 }, 
+                { email, role, academy_id }, 
                 process.env.JWT_SECRET || 'swpi-secret-key', 
                 { expiresIn: '24h' }
             );
             
-            console.log(`✅ Demo Bypass Used: ${email} logged in successfully.`);
+            console.log(`✅ Demo Bypass Used: ${email} logged in as ${role}.`);
             
             return res.json({
                 success: true,
                 token,
-                user: { email, role, school_id: 1 }
+                user: { email, role, academy_id }
             });
         }
 
-        // 2. STANDARD DB CHECK (For real users later)
+        // 2. STANDARD DB CHECK (For real users in Phase 3)
         const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
         if (result.rows.length === 0) {
             return res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -38,10 +42,12 @@ router.post('/login', async (req, res) => {
 
         // 3. SMART PASSWORD CHECK (Handles both bcrypt and plain text gracefully)
         let isMatch = false;
-        if (user.password.startsWith('$2b$') || user.password.startsWith('$2a$')) {
-            isMatch = await bcrypt.compare(password, user.password);
+        const dbPassword = user.password_hash || user.password; // Handle new DB schema
+        
+        if (dbPassword && (dbPassword.startsWith('$2b$') || dbPassword.startsWith('$2a$'))) {
+            isMatch = await bcrypt.compare(password, dbPassword);
         } else {
-            isMatch = (password === user.password); // Fallback for old plaintext passwords
+            isMatch = (password === dbPassword); // Fallback for old plaintext passwords
         }
 
         if (!isMatch) {
@@ -50,7 +56,7 @@ router.post('/login', async (req, res) => {
 
         // 4. SUCCESS
         const token = jwt.sign(
-            { id: user.id, email: user.email, role: user.role, school_id: user.school_id || 1 },
+            { id: user.id, email: user.email, role: user.role, academy_id: user.academy_id },
             process.env.JWT_SECRET || 'swpi-secret-key',
             { expiresIn: '24h' }
         );
@@ -58,7 +64,7 @@ router.post('/login', async (req, res) => {
         res.json({
             success: true,
             token,
-            user: { id: user.id, email: user.email, role: user.role, school_id: user.school_id || 1 }
+            user: { id: user.id, email: user.email, role: user.role, academy_id: user.academy_id }
         });
 
     } catch (err) {
