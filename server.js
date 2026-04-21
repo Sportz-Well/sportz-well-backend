@@ -12,9 +12,38 @@ const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 
 // ==========================================================
-// DATABASE AUTO-PATCH
+// DATABASE AUTO-PATCH: MULTI-ACADEMY & RBAC ARCHITECTURE
 // ==========================================================
 db.query(`
+    -- 1. Create Academies (The Walls)
+    CREATE TABLE IF NOT EXISTS academies (
+        id INTEGER PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        logo_url TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 2. Insert Default Academies (To prevent data orphans)
+    INSERT INTO academies (id, name, logo_url) VALUES 
+    (1, 'Singhania School Cricket Academy', 'https://via.placeholder.com/200x80/ffffff/0A192F?text=SINGHANIA+LOGO'),
+    (2, 'Automotive Cricket Academy', 'https://via.placeholder.com/200x80/ffffff/0A192F?text=AUTOMOTIVE+LOGO')
+    ON CONFLICT (id) DO NOTHING;
+
+    -- 3. Create Users (The Keys / Role-Based Access Control)
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        academy_id INTEGER REFERENCES academies(id),
+        name VARCHAR(255),
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL, -- 'admin', 'head_coach', 'junior_coach'
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 4. Update Players (Assigning to Academies)
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS academy_id INTEGER REFERENCES academies(id) DEFAULT 1;
+
+    -- Legacy auto-patches
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS overs_bowled NUMERIC(4,1) DEFAULT 0;
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS wickets INTEGER DEFAULT 0;
     ALTER TABLE match_logs ADD COLUMN IF NOT EXISTS runs_conceded INTEGER DEFAULT 0;
@@ -32,7 +61,7 @@ db.query(`
         technical_notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-`).then(() => console.log("✅ DB Auto-Patched: Video Logs ready."))
+`).then(() => console.log("✅ DB Auto-Patched: Multi-Academy RBAC ready."))
   .catch(err => console.error("Auto-patch error:", err));
 // ==========================================================
 
@@ -168,7 +197,6 @@ app.post('/api/generate-ai-report', async (req, res) => {
         const ecoRate = totalOvers > 0 ? (totalRunsConceded / totalOvers).toFixed(2) : "0.00";
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        // GOLDEN KEY MODEL SETUP
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
         const prompt = `
