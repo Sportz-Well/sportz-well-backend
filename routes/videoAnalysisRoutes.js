@@ -2,10 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const { GoogleGenAI } = require('@google/genai');
-
-// Initialize Gemini API
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // The Core Intellectual Property (IP) - The Expert Personas
 const PERSONA_PROMPTS = {
@@ -26,7 +23,7 @@ router.post('/', async (req, res) => {
         }
         const player = playerRes.rows[0];
 
-        // 2. Prepare the AI Prompt & Format Enforcer
+        // 2. Prepare the AI Prompt
         const systemInstruction = PERSONA_PROMPTS[persona] || PERSONA_PROMPTS['sachin'];
         const prompt = `
         Analyze the following player based on the coach's raw observations.
@@ -70,17 +67,20 @@ router.post('/', async (req, res) => {
         }
         `;
 
-        // 3. Fire the API Call to Google Gemini
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                systemInstruction: systemInstruction,
-                responseMimeType: "application/json",
-            }
+        // 3. Fire the API Call to Google Gemini using the existing correct package
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-2.5-flash",
+            systemInstruction: systemInstruction 
         });
 
-        const reportData = JSON.parse(response.text);
+        const result = await model.generateContent(prompt);
+        let textResponse = result.response.text();
+        
+        // Strip out any accidental markdown formatting the AI might add
+        textResponse = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+
+        const reportData = JSON.parse(textResponse);
 
         // Send the JSON report back to the frontend
         res.json({ success: true, report: reportData, player: player });
