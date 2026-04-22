@@ -86,7 +86,6 @@ const analyticsRoutes = require('./routes/analytics');
 const demoRoutes = require('./routes/demoRoutes');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
-// NEW: Video Analysis Route
 const videoAnalysisRoutes = require('./routes/videoAnalysisRoutes');
 
 app.get('/health', (_req, res) => { res.status(200).json({ success: true, message: 'SWPI API is running' }); });
@@ -198,8 +197,9 @@ app.post('/api/generate-ai-report', async (req, res) => {
         const batAvg = dismissals > 0 ? (totalRuns / dismissals).toFixed(2) : (totalRuns > 0 ? `${totalRuns} (Undefeated)` : "0.00");
         const ecoRate = totalOvers > 0 ? (totalRunsConceded / totalOvers).toFixed(2) : "0.00";
 
+        // FIX 1: Use the universally stable 1.5-flash model
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         const prompt = `
         You are an elite cricket high-performance coach writing a monthly report for the parents of ${player.name}.
@@ -212,13 +212,19 @@ app.post('/api/generate-ai-report', async (req, res) => {
         Coach's Subjective Remarks: "${coachNotes || 'No recent remarks.'}"
         
         Write a professional, encouraging 3-paragraph report. 
-        Paragraph 1: Summarize their statistical match form.
+        Paragraph 1: Summarize their statistical match form. (Acknowledge if there is no data yet).
         Paragraph 2: Perform a sentiment analysis on the coach's remarks regarding their mental focus and technique.
         Paragraph 3: Create a specific 3-step "Action Plan" of drills for them to work on next month.
         Do not use markdown like asterisks or bold text, just plain text with line breaks.
         `;
 
         const result = await model.generateContent(prompt);
+        
+        // FIX 2: Safety check to prevent crashes on empty AI responses
+        if (!result || !result.response) {
+            throw new Error("The AI returned an empty response.");
+        }
+        
         const aiReportText = result.response.text();
 
         res.status(200).json({
@@ -230,7 +236,8 @@ app.post('/api/generate-ai-report', async (req, res) => {
 
     } catch (err) {
         console.error("AI Gen Error:", err);
-        res.status(500).json({ error: "Failed to generate advanced analytics report." });
+        // FIX 3: Send the exact error string to the frontend so it shows in the alert box
+        res.status(500).json({ error: "AI Error: " + err.message });
     }
 });
 
@@ -241,7 +248,6 @@ app.use('/api/v1/assessments', assessmentRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/demo', demoRoutes);
 app.use('/api/v1/admin', adminRoutes);
-// NEW: Wire up the video analysis route
 app.use('/api/video-analysis', videoAnalysisRoutes);
 
 app.get('/', (_req, res) => { res.send('Sportz-Well Backend Running'); });
