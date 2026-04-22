@@ -166,8 +166,11 @@ app.post('/api/video-log', async (req, res) => {
     }
 });
 
+// Helper for Exponential Backoff
+const delay = ms => new Promise(res => setTimeout(res, ms));
+
 // ==========================================================
-// SWPI ADVANCED ANALYTICS ENGINE 
+// SWPI ADVANCED ANALYTICS ENGINE (With Backoff & Fallback)
 // ==========================================================
 app.post('/api/generate-ai-report', async (req, res) => {
     const { player_id } = req.body;
@@ -197,10 +200,6 @@ app.post('/api/generate-ai-report', async (req, res) => {
         const batAvg = dismissals > 0 ? (totalRuns / dismissals).toFixed(2) : (totalRuns > 0 ? `${totalRuns} (Undefeated)` : "0.00");
         const ecoRate = totalOvers > 0 ? (totalRunsConceded / totalOvers).toFixed(2) : "0.00";
 
-        // FIX: Using the correct, active gemini-2.5-flash model
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
         const prompt = `
         You are an elite cricket high-performance coach writing a monthly report for the parents of ${player.name}.
         
@@ -218,14 +217,45 @@ app.post('/api/generate-ai-report', async (req, res) => {
         Do not use markdown like asterisks or bold text, just plain text with line breaks.
         `;
 
-        const result = await model.generateContent(prompt);
-        
-        // Safety net for empty responses
-        if (!result || !result.response) {
-            throw new Error("The AI returned an empty response.");
+        // Retry Logic Configuration
+        let attempt = 0;
+        const maxAttempts = 3;
+        let aiReportText = "";
+        let aiSuccess = false;
+        let lastError = null;
+
+        while (attempt < maxAttempts && !aiSuccess) {
+            try {
+                // Determine model: Attempt 1 & 2 = 2.5-flash. Attempt 3 (Fallback) = 1.5-flash.
+                const currentModelName = (attempt === maxAttempts - 1) ? "gemini-1.5-flash" : "gemini-2.5-flash";
+                
+                const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+                const model = genAI.getGenerativeModel({ model: currentModelName });
+
+                const result = await model.generateContent(prompt);
+                
+                if (!result || !result.response) {
+                    throw new Error("The AI returned an empty response.");
+                }
+                
+                aiReportText = result.response.text();
+                aiSuccess = true;
+            } catch (err) {
+                lastError = err;
+                attempt++;
+                if (attempt < maxAttempts) {
+                    const waitTime = Math.pow(2, attempt) * 1000; // 2s, then 4s
+                    console.warn(`[SWPI Warning] AI Model overloaded. Attempt ${attempt} failed. Retrying in ${waitTime}ms...`);
+                    await delay(waitTime);
+                } else {
+                    console.error("[SWPI Critical] All AI retries and fallbacks exhausted.");
+                }
+            }
         }
-        
-        const aiReportText = result.response.text();
+
+        if (!aiSuccess) {
+            throw lastError; // Throw the final error if all retries fail
+        }
 
         res.status(200).json({
             success: true,
