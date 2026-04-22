@@ -226,8 +226,8 @@ app.post('/api/generate-ai-report', async (req, res) => {
 
         while (attempt < maxAttempts && !aiSuccess) {
             try {
-                // Determine model: Attempt 1 & 2 = 2.5-flash. Attempt 3 (Fallback) = 1.5-flash.
-                const currentModelName = (attempt === maxAttempts - 1) ? "gemini-1.5-flash" : "gemini-2.5-flash";
+                // Determine model: Attempt 1 & 2 = 2.5-flash. Attempt 3 (Fallback) = 2.5-flash-lite.
+                const currentModelName = (attempt === maxAttempts - 1) ? "gemini-2.5-flash-lite" : "gemini-2.5-flash";
                 
                 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
                 const model = genAI.getGenerativeModel({ model: currentModelName });
