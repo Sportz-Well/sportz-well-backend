@@ -197,9 +197,9 @@ app.post('/api/generate-ai-report', async (req, res) => {
         const batAvg = dismissals > 0 ? (totalRuns / dismissals).toFixed(2) : (totalRuns > 0 ? `${totalRuns} (Undefeated)` : "0.00");
         const ecoRate = totalOvers > 0 ? (totalRunsConceded / totalOvers).toFixed(2) : "0.00";
 
-        // FIX 1: Use the universally stable 1.5-flash model
+        // FIX: Using the correct, active gemini-2.5-flash model
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
         const prompt = `
         You are an elite cricket high-performance coach writing a monthly report for the parents of ${player.name}.
@@ -220,7 +220,7 @@ app.post('/api/generate-ai-report', async (req, res) => {
 
         const result = await model.generateContent(prompt);
         
-        // FIX 2: Safety check to prevent crashes on empty AI responses
+        // Safety net for empty responses
         if (!result || !result.response) {
             throw new Error("The AI returned an empty response.");
         }
@@ -236,7 +236,6 @@ app.post('/api/generate-ai-report', async (req, res) => {
 
     } catch (err) {
         console.error("AI Gen Error:", err);
-        // FIX 3: Send the exact error string to the frontend so it shows in the alert box
         res.status(500).json({ error: "AI Error: " + err.message });
     }
 });
