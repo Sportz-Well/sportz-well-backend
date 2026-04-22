@@ -86,6 +86,8 @@ const analyticsRoutes = require('./routes/analytics');
 const demoRoutes = require('./routes/demoRoutes');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+// NEW: Video Analysis Route
+const videoAnalysisRoutes = require('./routes/videoAnalysisRoutes');
 
 app.get('/health', (_req, res) => { res.status(200).json({ success: true, message: 'SWPI API is running' }); });
 
@@ -239,6 +241,8 @@ app.use('/api/v1/assessments', assessmentRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/demo', demoRoutes);
 app.use('/api/v1/admin', adminRoutes);
+// NEW: Wire up the video analysis route
+app.use('/api/video-analysis', videoAnalysisRoutes);
 
 app.get('/', (_req, res) => { res.send('Sportz-Well Backend Running'); });
 app.use((req, res) => { res.status(404).json({ success: false, message: 'Route not found' }); });
