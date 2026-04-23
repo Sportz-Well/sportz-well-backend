@@ -46,7 +46,6 @@ router.post('/provision', verifySuperAdmin, async (req, res) => {
         await db.query('BEGIN');
 
         // 1. Create the Academy (The Wall)
-        // CTO FIX: Dynamically calculating the next ID because the legacy schema lacks 'SERIAL'
         const academyResult = await db.query(
             `INSERT INTO academies (id, name) 
              VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM academies), $1) 
@@ -60,10 +59,11 @@ router.post('/provision', verifySuperAdmin, async (req, res) => {
         const passwordHash = await bcrypt.hash(coach_password, saltRounds);
 
         // 3. Create the Head Coach (The Key)
+        // CTO FIX: Auto-calculating the user ID just in case the legacy users table lacks 'SERIAL'
         await db.query(
-            `INSERT INTO users (academy_id, name, email, password_hash, role) 
-             VALUES ($1, $2, $3, $4, 'head_coach')`,
-            [academyId, coach_name, coach_email, passwordHash]
+            `INSERT INTO users (id, academy_id, name, email, password_hash, role) 
+             VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM users), $1, $2, $3, $4, 'head_coach')`,
+            [academyId, coach_name, coach_email.toLowerCase(), passwordHash]
         );
 
         // Commit Transaction if everything succeeds
@@ -75,7 +75,7 @@ router.post('/provision', verifySuperAdmin, async (req, res) => {
             data: {
                 academy_id: academyId,
                 academy_name: academy_name,
-                coach_email: coach_email
+                coach_email: coach_email.toLowerCase()
             }
         });
 
@@ -85,11 +85,11 @@ router.post('/provision', verifySuperAdmin, async (req, res) => {
         console.error('Provisioning Error:', error);
         
         // Handle Postgres unique constraint violation (Duplicate Email)
-        if (error.code === '23505') { 
-            return res.status(400).json({ error: 'Provisioning failed: Email already exists in the system.' });
+        if (error.code === '23505' || (error.message && error.message.includes('unique constraint'))) { 
+            return res.status(400).json({ error: 'Provisioning failed: That email address is already registered to another coach. You must use a unique email.' });
         }
         
-        res.status(500).json({ error: 'Internal server error during provisioning.' });
+        res.status(500).json({ error: 'DB Error: ' + error.message });
     }
 });
 
