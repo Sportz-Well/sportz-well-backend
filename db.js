@@ -1,36 +1,18 @@
 'use strict';
 
+// We import the actual connection pool from the config file
 const pool = require('./config/db');
 
-/**
- * Startup Patch: Runs right after connecting
- */
-async function runStartupPatch() {
-  try {
-    const patchSql = `
-      ALTER TABLE players 
-      ADD COLUMN IF NOT EXISTS school_id INTEGER DEFAULT 1, 
-      ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true,
-      ADD COLUMN IF NOT EXISTS school_id_no VARCHAR,
-      ADD COLUMN IF NOT EXISTS aadhaar_card_no VARCHAR,
-      ADD COLUMN IF NOT EXISTS gender VARCHAR,
-      ADD COLUMN IF NOT EXISTS age INTEGER,
-      ADD COLUMN IF NOT EXISTS std VARCHAR,
-      ADD COLUMN IF NOT EXISTS div VARCHAR,
-      ADD COLUMN IF NOT EXISTS role VARCHAR;
-    `;
-    await pool.query(patchSql);
-    console.log('✅ Startup patch applied: All columns verified on players table.');
-  } catch (err) {
-    console.error('❌ Startup patch failed:', err.message);
-  }
-}
-
-// Execute patch (this will run when root db.js is first required)
-runStartupPatch();
+// Note: All database schema auto-patches and migrations have been 
+// centralized in server.js to prevent schema drift and race conditions.
 
 module.exports = {
+  // A clean wrapper to execute queries
   query: (text, params) => pool.query(text, params),
+  
+  // Expose the raw client connection for advanced transactions
   connect: () => pool.connect(),
+  
+  // Expose the pool itself
   pool: pool
 };
