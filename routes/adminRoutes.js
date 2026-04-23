@@ -59,12 +59,11 @@ router.post('/provision', verifySuperAdmin, async (req, res) => {
         const passwordHash = await bcrypt.hash(coach_password, saltRounds);
 
         // 3. Create the Head Coach (The Key)
-        // CTO FIX: Dual-writing the passwordHash into both the new 'password_hash' column 
-        // AND the legacy 'password' column to bypass the old MVP NOT NULL constraints.
+        // CTO FIX: Separating the variables into $4 and $5 to prevent type-inference crashes
         await db.query(
             `INSERT INTO users (id, academy_id, name, email, password_hash, password, role) 
-             VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM users), $1, $2, $3, $4, $4, 'head_coach')`,
-            [academyId, coach_name, coach_email.toLowerCase(), passwordHash]
+             VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM users), $1, $2, $3, $4, $5, 'head_coach')`,
+            [academyId, coach_name, coach_email.toLowerCase(), passwordHash, passwordHash]
         );
 
         // Commit Transaction if everything succeeds
