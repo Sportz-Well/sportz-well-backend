@@ -59,10 +59,11 @@ router.post('/provision', verifySuperAdmin, async (req, res) => {
         const passwordHash = await bcrypt.hash(coach_password, saltRounds);
 
         // 3. Create the Head Coach (The Key)
-        // CTO FIX: Auto-calculating the user ID just in case the legacy users table lacks 'SERIAL'
+        // CTO FIX: Dual-writing the passwordHash into both the new 'password_hash' column 
+        // AND the legacy 'password' column to bypass the old MVP NOT NULL constraints.
         await db.query(
-            `INSERT INTO users (id, academy_id, name, email, password_hash, role) 
-             VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM users), $1, $2, $3, $4, 'head_coach')`,
+            `INSERT INTO users (id, academy_id, name, email, password_hash, password, role) 
+             VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM users), $1, $2, $3, $4, $4, 'head_coach')`,
             [academyId, coach_name, coach_email.toLowerCase(), passwordHash]
         );
 
