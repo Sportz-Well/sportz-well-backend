@@ -46,8 +46,11 @@ router.post('/provision', verifySuperAdmin, async (req, res) => {
         await db.query('BEGIN');
 
         // 1. Create the Academy (The Wall)
+        // CTO FIX: Dynamically calculating the next ID because the legacy schema lacks 'SERIAL'
         const academyResult = await db.query(
-            'INSERT INTO academies (name) VALUES ($1) RETURNING id',
+            `INSERT INTO academies (id, name) 
+             VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM academies), $1) 
+             RETURNING id`,
             [academy_name]
         );
         const academyId = academyResult.rows[0].id;
