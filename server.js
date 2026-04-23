@@ -40,9 +40,12 @@ db.query(`
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
-    -- 3.5 MISSING SCHEMA PATCHES FOR LEGACY USERS TABLE
+    -- 3.5 BRUTE-FORCE SCHEMA PATCHES FOR LEGACY USERS TABLE
+    -- This fixes the previous developer's schema drift
     ALTER TABLE users ADD COLUMN IF NOT EXISTS academy_id INTEGER DEFAULT 1;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'junior_coach';
 
     -- 4. Update Players (Assigning to Academies)
     ALTER TABLE players ADD COLUMN IF NOT EXISTS academy_id INTEGER REFERENCES academies(id) DEFAULT 1;
@@ -65,7 +68,7 @@ db.query(`
         technical_notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-`).then(() => console.log("✅ DB Auto-Patched: Multi-Academy RBAC ready. Name & Academy ID verified."))
+`).then(() => console.log("✅ DB Auto-Patched: Multi-Academy RBAC schema fully synchronized."))
   .catch(err => console.error("Auto-patch error:", err));
 // ==========================================================
 
