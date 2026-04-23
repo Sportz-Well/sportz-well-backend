@@ -40,6 +40,9 @@ db.query(`
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- 3.5 MISSING SCHEMA PATCH FOR LEGACY USERS TABLE
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS academy_id INTEGER DEFAULT 1;
+
     -- 4. Update Players (Assigning to Academies)
     ALTER TABLE players ADD COLUMN IF NOT EXISTS academy_id INTEGER REFERENCES academies(id) DEFAULT 1;
 
