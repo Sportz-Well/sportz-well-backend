@@ -2,22 +2,49 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const jwt = require('jsonwebtoken');
 
-// 1. ADD PLAYER (With Duplicate Prevention)
+// ==========================================================
+// SECURITY MIDDLEWARE: STRICT TENANT ISOLATION
+// ==========================================================
+const verifyCoach = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    try {
+        // Crack open the token to get the cryptographically verified identity
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret_key_change_this_in_production');
+        req.user = decoded; // Contains id, email, role, and the crucial academy_id
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: 'Unauthorized: Invalid or expired session' });
+    }
+};
+
+// Apply security middleware to ALL routes in this file
+router.use(verifyCoach);
+
+// ==========================================================
+// 1. ADD PLAYER (With Secure Tenant Injection)
+// ==========================================================
 router.post('/', async (req, res) => {
     try {
-        const { name, dob, gender, role, school_id_no, aadhaar_card_no, std, div, academy_id } = req.body;
+        const { name, dob, gender, role, school_id_no, aadhaar_card_no, std, div } = req.body;
+        
+        // CTO FIX: Ignore frontend claims. Extract Academy ID strictly from the secure token.
+        const secureAcademyId = req.user.academy_id; 
 
         if (!name || !dob) {
             return res.status(400).json({ success: false, message: "Name and DOB are strictly required." });
         }
 
-        const a_id = academy_id || 1; 
-
-        // THE FIX: Check for duplicates in this specific academy before inserting
+        // Check for duplicates strictly within their own academy
         const dupeCheck = await pool.query(
-            'SELECT id FROM players WHERE name = $1 AND (academy_id = $2 OR school_id = $2)', 
-            [name, a_id]
+            'SELECT id FROM players WHERE name = $1 AND academy_id = $2', 
+            [name, secureAcademyId]
         );
         
         if (dupeCheck.rows.length > 0) {
@@ -26,13 +53,13 @@ router.post('/', async (req, res) => {
 
         const insertQuery = `
             INSERT INTO players (
-                academy_id, school_id, name, date_of_birth, gender, role, 
+                academy_id, name, date_of_birth, gender, role, 
                 school_id_no, aadhaar_card_no, std, div, coach_signal
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Stable') RETURNING *;
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Stable') RETURNING *;
         `;
         
         const result = await pool.query(insertQuery, [
-            a_id, a_id, name, dob, gender || 'Not Specified', role || 'Unassigned',
+            secureAcademyId, name, dob, gender || 'Not Specified', role || 'Unassigned',
             school_id_no || null, aadhaar_card_no || null, std || null, div || null
         ]);
 
@@ -43,15 +70,18 @@ router.post('/', async (req, res) => {
     }
 });
 
-// 2. GET ALL PLAYERS FOR DIRECTORY (Filters by Academy, Fixes DOB mapping)
+// ==========================================================
+// 2. GET ALL PLAYERS FOR DIRECTORY (Secure Filter)
+// ==========================================================
 router.get('/', async (req, res) => {
     try {
-        const academyId = req.query.academy_id || 1; 
+        // CTO FIX: Ignore URL queries. Enforce JWT Academy ID.
+        const secureAcademyId = req.user.academy_id; 
         
-        // THE FIX: "date_of_birth AS dob" forces the DB to hand the data to the frontend using the name it expects
+        // Removed legacy 'school_id' checks to prevent schema drift bugs
         const result = await pool.query(
-            'SELECT *, date_of_birth AS dob FROM players WHERE academy_id = $1 OR school_id = $1 ORDER BY name ASC', 
-            [academyId]
+            'SELECT *, date_of_birth AS dob FROM players WHERE academy_id = $1 ORDER BY name ASC', 
+            [secureAcademyId]
         );
         res.json(result.rows);
     } catch (err) {
@@ -59,16 +89,21 @@ router.get('/', async (req, res) => {
     }
 });
 
-// 3. GET SINGLE INDIVIDUAL PLAYER (For the Profile Page)
+// ==========================================================
+// 3. GET SINGLE INDIVIDUAL PLAYER (Cross-Tenant Prevented)
+// ==========================================================
 router.get('/:id', async (req, res) => {
     try {
+        const secureAcademyId = req.user.academy_id; 
+
+        // CTO FIX: Appended 'AND academy_id = $2' so a coach cannot query a player from another academy
         const result = await pool.query(
-            'SELECT *, date_of_birth AS dob FROM players WHERE id = $1', 
-            [req.params.id]
+            'SELECT *, date_of_birth AS dob FROM players WHERE id = $1 AND academy_id = $2', 
+            [req.params.id, secureAcademyId]
         );
         
         if (result.rows.length === 0) {
-            return res.status(404).json({ message: "Player not found." });
+            return res.status(404).json({ message: "Player not found, or you do not have permission to view them." });
         }
         res.json(result.rows[0]);
     } catch (err) {
@@ -76,29 +111,38 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// 4. SECURE CASCADE DELETE (Wipes Player + All their data histories)
+// ==========================================================
+// 4. SECURE CASCADE DELETE (Wipes Player + Data)
+// ==========================================================
 router.delete('/:id', async (req, res) => {
     try {
         const playerId = req.params.id;
+        const secureAcademyId = req.user.academy_id;
 
-        // Start a database transaction so if one fails, they all cancel to prevent data corruption
+        // CTO FIX: Verify ownership BEFORE starting the destructive delete transaction
+        const verifyOwnership = await pool.query(
+            'SELECT id FROM players WHERE id = $1 AND academy_id = $2', 
+            [playerId, secureAcademyId]
+        );
+
+        if (verifyOwnership.rows.length === 0) {
+            return res.status(403).json({ success: false, message: "Forbidden: You cannot delete a player from another academy." });
+        }
+
+        // Start a database transaction so if one fails, they all cancel
         await pool.query('BEGIN');
 
-        // Wipe all associated child data first (Cascading Delete)
+        // Wipe all associated child data first
         await pool.query('DELETE FROM match_logs WHERE player_id = $1', [playerId]);
         await pool.query('DELETE FROM daily_attendance WHERE player_id = $1', [playerId]);
         await pool.query('DELETE FROM weekly_assessments WHERE player_id = $1', [playerId]);
         await pool.query('DELETE FROM coach_remarks WHERE player_id = $1', [playerId]);
         await pool.query('DELETE FROM video_logs WHERE player_id = $1', [playerId]);
 
-        // Finally, delete the actual player record
-        const result = await pool.query('DELETE FROM players WHERE id = $1 RETURNING *', [playerId]);
+        // Delete the actual player record
+        await pool.query('DELETE FROM players WHERE id = $1', [playerId]);
 
         await pool.query('COMMIT');
-
-        if (result.rowCount === 0) {
-            return res.status(404).json({ success: false, message: "Player not found." });
-        }
 
         res.json({ success: true, message: "Player and all associated data permanently deleted." });
 
