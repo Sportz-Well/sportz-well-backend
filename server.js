@@ -40,8 +40,9 @@ db.query(`
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
-    -- 3.5 MISSING SCHEMA PATCH FOR LEGACY USERS TABLE
+    -- 3.5 MISSING SCHEMA PATCHES FOR LEGACY USERS TABLE
     ALTER TABLE users ADD COLUMN IF NOT EXISTS academy_id INTEGER DEFAULT 1;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);
 
     -- 4. Update Players (Assigning to Academies)
     ALTER TABLE players ADD COLUMN IF NOT EXISTS academy_id INTEGER REFERENCES academies(id) DEFAULT 1;
@@ -64,7 +65,7 @@ db.query(`
         technical_notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-`).then(() => console.log("✅ DB Auto-Patched: Multi-Academy RBAC ready."))
+`).then(() => console.log("✅ DB Auto-Patched: Multi-Academy RBAC ready. Name & Academy ID verified."))
   .catch(err => console.error("Auto-patch error:", err));
 // ==========================================================
 
@@ -229,7 +230,6 @@ app.post('/api/generate-ai-report', async (req, res) => {
 
         while (attempt < maxAttempts && !aiSuccess) {
             try {
-                // Determine model: Attempt 1 & 2 = 2.5-flash. Attempt 3 (Fallback) = 2.5-flash-lite.
                 const currentModelName = (attempt === maxAttempts - 1) ? "gemini-2.5-flash-lite" : "gemini-2.5-flash";
                 
                 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -247,7 +247,7 @@ app.post('/api/generate-ai-report', async (req, res) => {
                 lastError = err;
                 attempt++;
                 if (attempt < maxAttempts) {
-                    const waitTime = Math.pow(2, attempt) * 1000; // 2s, then 4s
+                    const waitTime = Math.pow(2, attempt) * 1000;
                     console.warn(`[SWPI Warning] AI Model overloaded. Attempt ${attempt} failed. Retrying in ${waitTime}ms...`);
                     await delay(waitTime);
                 } else {
@@ -257,7 +257,7 @@ app.post('/api/generate-ai-report', async (req, res) => {
         }
 
         if (!aiSuccess) {
-            throw lastError; // Throw the final error if all retries fail
+            throw lastError;
         }
 
         res.status(200).json({
