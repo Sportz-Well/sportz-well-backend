@@ -5,6 +5,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const db = require('./db'); 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const jwt = require('jsonwebtoken'); // CTO ADDITION: Required for route security
 
 dotenv.config();
 
@@ -93,18 +94,43 @@ const demoRoutes = require('./routes/demoRoutes');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const videoAnalysisRoutes = require('./routes/videoAnalysisRoutes');
-const academyRoutes = require('./routes/academyRoutes'); // NEW CTO ADDITION
+const academyRoutes = require('./routes/academyRoutes'); 
 
 app.get('/health', (_req, res) => { res.status(200).json({ success: true, message: 'SWPI API is running' }); });
 
-// PHASE 2 ROUTES
-app.post('/api/attendance', async (req, res) => {
-    const { school_id, date, attendance_data } = req.body;
-    if (!school_id || !date || !attendance_data || attendance_data.length === 0) return res.status(400).json({ error: "Missing data." });
+// ==========================================================
+// SECURITY MIDDLEWARE: TENANT ISOLATION FOR PHASE 2 ROUTES
+// ==========================================================
+const verifyCoach = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret_key_change_this_in_production');
+        req.user = decoded; 
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: 'Unauthorized: Invalid or expired session' });
+    }
+};
+
+// ==========================================================
+// PHASE 2 ROUTES (Fully Secured)
+// ==========================================================
+
+app.post('/api/attendance', verifyCoach, async (req, res) => {
+    const { date, attendance_data } = req.body;
+    const secureAcademyId = req.user.academy_id; // CTO FIX: Extracted from token
+
+    if (!date || !attendance_data || attendance_data.length === 0) return res.status(400).json({ error: "Missing data." });
     try {
         await db.query('BEGIN');
         for (const record of attendance_data) {
-            await db.query(`INSERT INTO daily_attendance (player_id, school_id, date, status) VALUES ($1, $2, $3, $4)`, [record.player_id, school_id, date, record.status]);
+            await db.query(`INSERT INTO daily_attendance (player_id, school_id, date, status) VALUES ($1, $2, $3, $4)`, 
+            [record.player_id, secureAcademyId, date, record.status]);
         }
         await db.query('COMMIT');
         res.status(200).json({ message: "Attendance saved!" });
@@ -114,13 +140,15 @@ app.post('/api/attendance', async (req, res) => {
     }
 });
 
-app.post('/api/weekly-assessment', async (req, res) => {
-    const { school_id, player_id, assessment_date, physical_score, technical_score, mental_score } = req.body;
-    if (!school_id || !player_id || !assessment_date) return res.status(400).json({ error: "Missing data." });
+app.post('/api/weekly-assessment', verifyCoach, async (req, res) => {
+    const { player_id, assessment_date, physical_score, technical_score, mental_score } = req.body;
+    const secureAcademyId = req.user.academy_id;
+
+    if (!player_id || !assessment_date) return res.status(400).json({ error: "Missing data." });
     try {
         await db.query(
             `INSERT INTO weekly_assessments (player_id, school_id, assessment_date, physical_score, technical_score, mental_score) VALUES ($1, $2, $3, $4, $5, $6)`,
-            [player_id, school_id, assessment_date, physical_score, technical_score, mental_score]
+            [player_id, secureAcademyId, assessment_date, physical_score, technical_score, mental_score]
         );
         res.status(200).json({ message: "Assessment saved!" });
     } catch (err) {
@@ -128,13 +156,15 @@ app.post('/api/weekly-assessment', async (req, res) => {
     }
 });
 
-app.post('/api/match-log', async (req, res) => {
-    const { school_id, player_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs } = req.body;
-    if (!school_id || !player_id || !match_date) return res.status(400).json({ error: "Missing match data." });
+app.post('/api/match-log', verifyCoach, async (req, res) => {
+    const { player_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs } = req.body;
+    const secureAcademyId = req.user.academy_id;
+
+    if (!player_id || !match_date) return res.status(400).json({ error: "Missing match data." });
     try {
         await db.query(
             `INSERT INTO match_logs (player_id, school_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-            [player_id, school_id, match_date, tournament_name, runs || 0, balls_faced || 0, fours || 0, sixes || 0, not_out || false, overs_bowled || 0, wickets || 0, runs_conceded || 0, catches || 0, stumpings || 0, run_outs || 0]
+            [player_id, secureAcademyId, match_date, tournament_name, runs || 0, balls_faced || 0, fours || 0, sixes || 0, not_out || false, overs_bowled || 0, wickets || 0, runs_conceded || 0, catches || 0, stumpings || 0, run_outs || 0]
         );
         res.status(200).json({ message: "Match logged!" });
     } catch (err) {
@@ -142,21 +172,25 @@ app.post('/api/match-log', async (req, res) => {
     }
 });
 
-app.post('/api/coach-remarks', async (req, res) => {
-    const { school_id, player_id, remark_date, notes } = req.body;
-    if (!school_id || !player_id || !remark_date || !notes) return res.status(400).json({ error: "Missing remark data." });
+app.post('/api/coach-remarks', verifyCoach, async (req, res) => {
+    const { player_id, remark_date, notes } = req.body;
+    const secureAcademyId = req.user.academy_id;
+
+    if (!player_id || !remark_date || !notes) return res.status(400).json({ error: "Missing remark data." });
     try {
-        await db.query(`INSERT INTO coach_remarks (player_id, school_id, remark_date, notes) VALUES ($1, $2, $3, $4)`, [player_id, school_id, remark_date, notes]);
+        await db.query(`INSERT INTO coach_remarks (player_id, school_id, remark_date, notes) VALUES ($1, $2, $3, $4)`, 
+        [player_id, secureAcademyId, remark_date, notes]);
         res.status(200).json({ message: "Remark saved!" });
     } catch (err) {
         res.status(500).json({ error: "Failed to save remark." });
     }
 });
 
-app.post('/api/video-log', async (req, res) => {
-    const { school_id, player_id, upload_date, video_url, technical_notes } = req.body;
+app.post('/api/video-log', verifyCoach, async (req, res) => {
+    const { player_id, upload_date, video_url, technical_notes } = req.body;
+    const secureAcademyId = req.user.academy_id;
     
-    if (!school_id || !player_id || !upload_date || !video_url) {
+    if (!player_id || !upload_date || !video_url) {
         return res.status(400).json({ error: "Missing required video data." });
     }
 
@@ -164,7 +198,7 @@ app.post('/api/video-log', async (req, res) => {
         await db.query(
             `INSERT INTO video_logs (player_id, school_id, upload_date, video_url, technical_notes)
              VALUES ($1, $2, $3, $4, $5)`,
-            [player_id, school_id, upload_date, video_url, technical_notes]
+            [player_id, secureAcademyId, upload_date, video_url, technical_notes]
         );
         res.status(200).json({ message: "Video analysis saved successfully!" });
     } catch (err) {
@@ -179,13 +213,16 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 // ==========================================================
 // SWPI ADVANCED ANALYTICS ENGINE (With Backoff & Fallback)
 // ==========================================================
-app.post('/api/generate-ai-report', async (req, res) => {
+app.post('/api/generate-ai-report', verifyCoach, async (req, res) => {
     const { player_id } = req.body;
+    const secureAcademyId = req.user.academy_id;
+
     if (!player_id) return res.status(400).json({ error: "Missing player_id" });
 
     try {
-        const playerRes = await db.query('SELECT name FROM players WHERE id = $1', [player_id]);
-        if (playerRes.rows.length === 0) return res.status(404).json({ error: "Player not found" });
+        // CTO FIX: Prevent IDOR. Ensure this player actually belongs to this coach's academy before hitting the AI
+        const playerRes = await db.query('SELECT name FROM players WHERE id = $1 AND academy_id = $2', [player_id, secureAcademyId]);
+        if (playerRes.rows.length === 0) return res.status(403).json({ error: "Access denied or Player not found." });
         const player = playerRes.rows[0];
 
         const matchesRes = await db.query('SELECT * FROM match_logs WHERE player_id = $1 ORDER BY match_date DESC LIMIT 10', [player_id]);
@@ -284,7 +321,7 @@ app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/demo', demoRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/video-analysis', videoAnalysisRoutes);
-app.use('/api/v1/academies', academyRoutes); // NEW CTO ADDITION
+app.use('/api/v1/academies', academyRoutes); 
 
 app.get('/', (_req, res) => { res.send('Sportz-Well Backend Running'); });
 app.use((req, res) => { res.status(404).json({ success: false, message: 'Route not found' }); });
