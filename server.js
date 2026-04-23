@@ -41,7 +41,6 @@ db.query(`
     );
 
     -- 3.5 BRUTE-FORCE SCHEMA PATCHES FOR LEGACY USERS TABLE
-    -- This fixes the previous developer's schema drift
     ALTER TABLE users ADD COLUMN IF NOT EXISTS academy_id INTEGER DEFAULT 1;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
@@ -94,6 +93,7 @@ const demoRoutes = require('./routes/demoRoutes');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const videoAnalysisRoutes = require('./routes/videoAnalysisRoutes');
+const academyRoutes = require('./routes/academyRoutes'); // NEW CTO ADDITION
 
 app.get('/health', (_req, res) => { res.status(200).json({ success: true, message: 'SWPI API is running' }); });
 
@@ -284,6 +284,7 @@ app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/demo', demoRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/video-analysis', videoAnalysisRoutes);
+app.use('/api/v1/academies', academyRoutes); // NEW CTO ADDITION
 
 app.get('/', (_req, res) => { res.send('Sportz-Well Backend Running'); });
 app.use((req, res) => { res.status(404).json({ success: false, message: 'Route not found' }); });
