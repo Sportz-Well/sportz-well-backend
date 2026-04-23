@@ -1,84 +1,76 @@
 'use strict';
 
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const db = require('../db');
 
-// LOGIN
+// ==========================================================
+// ENTERPRISE AUTHENTICATION CONTROLLER
+// ==========================================================
 async function login(req, res) {
-  try {
-    // 1. THE SPY: Print exactly what the frontend is sending us
-    console.log("--- NEW LOGIN ATTEMPT ---");
-    console.log("Raw Request Body:", req.body);
+    try {
+        const { email, password } = req.body;
 
-    // 2. CATCH-ALL: Check for every possible variable name the frontend might be using
-    const { email, password, username, pass } = req.body;
+        // 1. Strict Input Validation
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email and password are required.' });
+        }
 
-    const rawEmail = email || username || '';
-    const rawPass = password || pass || '';
+        const safeEmail = String(email).trim().toLowerCase();
 
-    const safeEmail = String(rawEmail).trim().toLowerCase();
-    const safePassword = String(rawPass).trim();
+        // 2. Fetch user from the database
+        const result = await db.query(
+            'SELECT id, email, password_hash, role, academy_id FROM users WHERE email = $1',
+            [safeEmail]
+        );
 
-    console.log(`Cleaned Data -> Email: '${safeEmail}', Password: '${safePassword}'`);
+        if (result.rows.length === 0) {
+            console.warn(`[AUTH FAILED] Attempted login for non-existent user: ${safeEmail}`);
+            return res.status(401).json({ error: 'Invalid login credentials.' });
+        }
 
-    // =========================================================
-    // THE ULTIMATE DEMO OVERRIDE
-    // If the email has 'coach' in it, OR the password is 'demo123', let them in!
-    // =========================================================
-    if (safeEmail.includes('coach') || safePassword === 'demo123') {
-      console.log("✅ VIP Master Key Accepted! Opening door.");
-      return res.json({
-        success: true,
-        token: 'swpi-demo-token-12345',
-        user: { id: 999, email: 'coach@sportz-well.com', role: 'coach' }
-      });
+        const user = result.rows[0];
+
+        // 3. Cryptographic Password Verification
+        const match = await bcrypt.compare(password, user.password_hash);
+
+        if (!match) {
+            console.warn(`[AUTH FAILED] Invalid password attempt for: ${safeEmail}`);
+            return res.status(401).json({ error: 'Invalid login credentials.' });
+        }
+
+        // 4. Generate a Secure JSON Web Token (JWT)
+        const tokenPayload = {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            academy_id: user.academy_id
+        };
+
+        // Note: process.env.JWT_SECRET must be set in your Render environment variables
+        const token = jwt.sign(
+            tokenPayload, 
+            process.env.JWT_SECRET || 'fallback_secret_key_change_this_in_production', 
+            { expiresIn: '24h' }
+        );
+
+        console.log(`✅ [AUTH SUCCESS] User logged in: ${user.email} (Role: ${user.role}, Academy ID: ${user.academy_id})`);
+
+        return res.json({
+            success: true,
+            token: token,
+            user: {
+                id: user.id,
+                email: user.email,
+                role: user.role,
+                academy_id: user.academy_id
+            }
+        });
+
+    } catch (err) {
+        console.error("[AUTH FATAL ERROR] Server Exception during login:", err);
+        res.status(500).json({ error: 'Internal server authentication error.' });
     }
-    // =========================================================
-
-    const result = await db.query('SELECT * FROM users WHERE email = $1', [safeEmail]);
-
-    if (result.rows.length === 0) {
-      console.log("❌ DB Check Failed: User not found");
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const user = result.rows[0];
-    const match = await bcrypt.compare(safePassword, user.password);
-
-    if (!match) {
-      console.log("❌ DB Check Failed: Password mismatch");
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    console.log("✅ Regular DB Login Successful!");
-    return res.json({
-      success: true,
-      token: 'swpi-demo-token-12345',
-      user: { id: user.id, email: user.email, role: user.role || 'coach' }
-    });
-
-  } catch (err) {
-    console.error("Server Error during login:", err);
-    res.status(500).json({ error: 'Server error' });
-  }
 }
 
-// TEMP ADMIN CREATION
-async function createAdmin(req, res) {
-  try {
-    const email = 'admin@sportzwell.com';
-    const password = 'admin123';
-    const hashed = await bcrypt.hash(password, 10);
-
-    await db.query(
-      `INSERT INTO users (email, password, role) VALUES ($1, $2, 'admin') ON CONFLICT (email) DO UPDATE SET password = $2`,
-      [email, hashed]
-    );
-    res.json({ success: true, message: 'Admin created/updated' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to create admin' });
-  }
-}
-
-module.exports = { login, createAdmin };
+module.exports = { login };
