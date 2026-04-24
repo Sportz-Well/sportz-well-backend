@@ -35,7 +35,10 @@ router.post('/', async (req, res) => {
         const { name, dob, gender, role, school_id_no, aadhaar_card_no, std, div } = req.body;
         
         // CTO FIX: Ignore frontend claims. Extract Academy ID strictly from the secure token.
-        const secureAcademyId = req.user.academy_id; 
+        // If an admin is creating a player, we allow them to pass the academy_id, otherwise enforce their own.
+        const secureAcademyId = (req.user.role === 'admin' && req.body.academy_id) 
+            ? req.body.academy_id 
+            : req.user.academy_id; 
 
         if (!name || !dob) {
             return res.status(400).json({ success: false, message: "Name and DOB are strictly required." });
@@ -48,7 +51,7 @@ router.post('/', async (req, res) => {
         );
         
         if (dupeCheck.rows.length > 0) {
-            return res.status(400).json({ success: false, message: "A player with this exact name already exists in your Academy." });
+            return res.status(400).json({ success: false, message: "A player with this exact name already exists in this Academy." });
         }
 
         const insertQuery = `
@@ -71,17 +74,20 @@ router.post('/', async (req, res) => {
 });
 
 // ==========================================================
-// 2. GET ALL PLAYERS FOR DIRECTORY (Secure Filter)
+// 2. GET ALL PLAYERS FOR DIRECTORY (Secure Filter + Admin Override)
 // ==========================================================
 router.get('/', async (req, res) => {
     try {
-        // CTO FIX: Ignore URL queries. Enforce JWT Academy ID.
-        const secureAcademyId = req.user.academy_id; 
+        let targetAcademyId = req.user.academy_id; 
+
+        // SUPER ADMIN OVERRIDE
+        if (req.user.role === 'admin' && req.query.academy_id) {
+            targetAcademyId = req.query.academy_id;
+        }
         
-        // Removed legacy 'school_id' checks to prevent schema drift bugs
         const result = await pool.query(
             'SELECT *, date_of_birth AS dob FROM players WHERE academy_id = $1 ORDER BY name ASC', 
-            [secureAcademyId]
+            [targetAcademyId]
         );
         res.json(result.rows);
     } catch (err) {
@@ -90,17 +96,20 @@ router.get('/', async (req, res) => {
 });
 
 // ==========================================================
-// 3. GET SINGLE INDIVIDUAL PLAYER (Cross-Tenant Prevented)
+// 3. GET SINGLE INDIVIDUAL PLAYER (Cross-Tenant Prevented + Admin Override)
 // ==========================================================
 router.get('/:id', async (req, res) => {
     try {
-        const secureAcademyId = req.user.academy_id; 
+        let queryStr = 'SELECT *, date_of_birth AS dob FROM players WHERE id = $1 AND academy_id = $2';
+        let queryParams = [req.params.id, req.user.academy_id];
 
-        // CTO FIX: Appended 'AND academy_id = $2' so a coach cannot query a player from another academy
-        const result = await pool.query(
-            'SELECT *, date_of_birth AS dob FROM players WHERE id = $1 AND academy_id = $2', 
-            [req.params.id, secureAcademyId]
-        );
+        // SUPER ADMIN OVERRIDE
+        if (req.user.role === 'admin') {
+            queryStr = 'SELECT *, date_of_birth AS dob FROM players WHERE id = $1';
+            queryParams = [req.params.id];
+        }
+
+        const result = await pool.query(queryStr, queryParams);
         
         if (result.rows.length === 0) {
             return res.status(404).json({ message: "Player not found, or you do not have permission to view them." });
@@ -112,18 +121,23 @@ router.get('/:id', async (req, res) => {
 });
 
 // ==========================================================
-// 4. SECURE CASCADE DELETE (Wipes Player + Data)
+// 4. SECURE CASCADE DELETE (Wipes Player + Data + Admin Override)
 // ==========================================================
 router.delete('/:id', async (req, res) => {
     try {
         const playerId = req.params.id;
-        const secureAcademyId = req.user.academy_id;
-
-        // CTO FIX: Verify ownership BEFORE starting the destructive delete transaction
-        const verifyOwnership = await pool.query(
-            'SELECT id FROM players WHERE id = $1 AND academy_id = $2', 
-            [playerId, secureAcademyId]
-        );
+        
+        let verifyOwnership;
+        
+        // SUPER ADMIN OVERRIDE
+        if (req.user.role === 'admin') {
+            verifyOwnership = await pool.query('SELECT id FROM players WHERE id = $1', [playerId]);
+        } else {
+            verifyOwnership = await pool.query(
+                'SELECT id FROM players WHERE id = $1 AND academy_id = $2', 
+                [playerId, req.user.academy_id]
+            );
+        }
 
         if (verifyOwnership.rows.length === 0) {
             return res.status(403).json({ success: false, message: "Forbidden: You cannot delete a player from another academy." });
