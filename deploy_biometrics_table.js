@@ -1,8 +1,17 @@
 // deploy_biometrics_table.js
-// SWPI Automated DB Deployment Script
-const pool = require('./db'); // Uses your existing secure Render connection
+// SWPI Automated DB Deployment Script - V2 (Self-Contained SSL Client)
+require('dotenv').config(); 
+const { Client } = require('pg');
 
 const deployTable = async () => {
+    // Create a dedicated client just for this script, enforcing SSL for Render
+    const client = new Client({
+        connectionString: process.env.DATABASE_URL, 
+        ssl: {
+            rejectUnauthorized: false // Strictly required for external connections to Render
+        }
+    });
+
     const query = `
         CREATE TABLE IF NOT EXISTS biomechanical_logs (
             id SERIAL PRIMARY KEY,
@@ -18,16 +27,20 @@ const deployTable = async () => {
     `;
 
     try {
-        console.log("Attempting to connect to the Render PostgreSQL database...");
-        await pool.query(query);
+        console.log("Attempting to connect to the Render PostgreSQL database securely...");
+        await client.connect();
+        console.log("Connection established. Executing query...");
+        
+        await client.query(query);
+        
         console.log("✅ SUCCESS: The 'biomechanical_logs' table has been safely deployed to Render.");
         console.log("You can now safely close this script.");
     } catch (err) {
         console.error("❌ FATAL ERROR: Failed to create the table.");
         console.error(err.message);
     } finally {
-        // Close the database connection and exit the script
-        pool.end();
+        // Safely disconnect
+        await client.end();
         process.exit();
     }
 };
