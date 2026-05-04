@@ -7,52 +7,55 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 router.post('/analyze', async (req, res) => {
-    // NEW: We now extract snapshot_base64 from the incoming request
     const { player_id, ai_persona, kinematic_data, snapshot_base64 } = req.body;
     
-    // Fallbacks for MVP testing if JWT isn't fully active yet
+    // Fallbacks for MVP testing
     const user_id = req.user ? req.user.id : 1; 
-    const academy_id = req.user ? req.user.academy_id : 1;
 
     try {
+        // THE FIX: Bulletproof wildcard query. It will grab whatever columns actually exist.
         const playerCheck = await pool.query(
-            'SELECT id, first_name, last_name, primary_role FROM players WHERE id = $1 AND academy_id = $2',
-            [player_id, academy_id]
+            'SELECT * FROM players WHERE id = $1',
+            [player_id]
         );
 
         if (playerCheck.rows.length === 0) {
-            return res.status(403).json({ error: "Access Denied: Player does not exist in your academy vault." });
+            return res.status(404).json({ error: "Player not found in database." });
         }
 
         const player = playerCheck.rows[0];
 
+        // Safely extract names regardless of legacy schema structure
+        const playerName = player.name || `${player.first_name || ''} ${player.last_name || ''}`.trim() || "Athlete";
+        const playerRole = player.role || player.primary_role || "Cricket Player";
+
         // PROMPT ENGINEERING
         let systemInstruction = "";
         if (ai_persona === "The Master") {
-            systemInstruction = "You are an elite batting coach ('The Master'). Analyze the provided kinematic data (joint angles, posture). Write a supportive but highly analytical 2-paragraph biomechanical assessment for the parents, focusing on batting technique. Do not use complex jargon without explaining it.";
+            systemInstruction = "You are an elite batting coach ('The Master'). Analyze the provided kinematic data. Write a supportive but highly analytical 2-paragraph biomechanical assessment for the parents, focusing on batting technique. Do not use complex jargon without explaining it.";
         } else if (ai_persona === "The Sultan") {
             systemInstruction = "You are an elite fast-bowling coach ('The Sultan'). Analyze the provided kinematic data. Write a supportive but highly analytical 2-paragraph biomechanical assessment for the parents, focusing on pace bowling mechanics, momentum, and injury prevention.";
         } else if (ai_persona === "The Magician") {
             systemInstruction = "You are an elite spin-bowling coach ('The Magician'). Analyze the provided kinematic data. Write a supportive but highly analytical 2-paragraph biomechanical assessment for the parents, focusing on spin mechanics, flight, and body rotation.";
         } else {
-            systemInstruction = "You are an elite cricket coach. Analyze the provided kinematic data and write a 2-paragraph biomechanical assessment for the parents.";
+            systemInstruction = "You are an elite cricket coach. Analyze the provided kinematic data and write a 2-paragraph biomechanical assessment.";
         }
 
         const prompt = `
             ${systemInstruction}
-            Player Name: ${player.first_name} ${player.last_name}
-            Role: ${player.primary_role}
-            Raw Kinematic Data (Averaged over 3 clips): ${JSON.stringify(kinematic_data)}
+            Player Name: ${playerName}
+            Role: ${playerRole}
+            Raw Kinematic Data: ${JSON.stringify(kinematic_data)}
             
             Generate the official Parent Report text now.
         `;
 
-        console.log(`Triggering Gemini API for Player ID: ${player_id}...`);
+        console.log(`Triggering Gemini API for ${playerName}...`);
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" }); 
         const result = await model.generateContent(prompt);
         const aiReport = result.response.text();
 
-        // SAVE TO VAULT: Now includes the snapshot_base64 payload
+        // SAVE TO VAULT
         const insertQuery = `
             INSERT INTO biomechanical_logs 
             (player_id, generated_by_user_id, assessment_date, ai_persona, kinematic_data_json, snapshot_base64, ai_generated_report, status)
@@ -65,7 +68,7 @@ router.post('/analyze', async (req, res) => {
             user_id,
             ai_persona,
             JSON.stringify(kinematic_data),
-            snapshot_base64, // Pushing the image string into the db
+            snapshot_base64,
             aiReport
         ]);
 
