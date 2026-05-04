@@ -1,4 +1,4 @@
--- SWPI Core Database Schema (MVP 1.1 - Edge Processing Update)
+-- SWPI Core Database Schema (MVP 1.2 - Skeletal Snapshot Update)
 
 CREATE TABLE academies (
     id SERIAL PRIMARY KEY,
@@ -56,15 +56,16 @@ CREATE TABLE match_logs (
     runs_conceded INT DEFAULT 0
 );
 
--- NEW TABLE: Stores Edge-Processed Camera Data and Gemini AI Outputs
+-- UPDATED TABLE: Now includes the snapshot_base64 column
 CREATE TABLE biomechanical_logs (
     id SERIAL PRIMARY KEY,
     player_id INT REFERENCES players(id),
-    generated_by_user_id INT REFERENCES users(id), -- Tracks which Admin/Coach pressed generate
+    generated_by_user_id INT REFERENCES users(id), 
     assessment_date DATE NOT NULL,
-    ai_persona VARCHAR(50) NOT NULL, -- e.g., 'The Master', 'The Magician'
-    kinematic_data_json JSONB NOT NULL, -- Stores the raw browser-extracted angles
-    ai_generated_report TEXT, -- Stores the automated Gemini text output
-    status VARCHAR(20) DEFAULT 'Data_Captured', -- Changes to 'Report_Generated' to lock the UI
+    ai_persona VARCHAR(50) NOT NULL, 
+    kinematic_data_json JSONB NOT NULL, 
+    snapshot_base64 TEXT, -- NEW: Stores the lightweight image string
+    ai_generated_report TEXT, 
+    status VARCHAR(20) DEFAULT 'Data_Captured', 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
