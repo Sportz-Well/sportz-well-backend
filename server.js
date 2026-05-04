@@ -10,26 +10,23 @@ const PORT = process.env.PORT || 3000;
 // MIDDLEWARE
 // ==========================================
 app.use(cors());
-app.use(express.json());
+
+// THE FIX: Increase the default 100kb limit to 50mb to allow Base64 Image uploads
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // ==========================================
 // ROUTE IMPORTS
 // ==========================================
-// Restoring your core MVP routes
 const authRoutes = require('./routes/authRoutes'); 
 const playerRoutes = require('./routes/playerRoutes'); 
-
-// The new AI Biometric pipe
 const biometricRoutes = require('./routes/biometricRoutes');
 
 // ==========================================
 // ROUTE REGISTRATION
 // ==========================================
-// Restoring the core API endpoints
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/players', playerRoutes);
-
-// Registering the new AI pipe
 app.use('/api/v1/biometrics', biometricRoutes);
 
 // ==========================================
