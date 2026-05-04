@@ -1,85 +1,86 @@
-'use strict';
+// routes/biometricRoutes.js
 const express = require('express');
 const router = express.Router();
-const pool = require('../db');
+const pool = require('../db'); 
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// POST: Save Quarterly Assessments
-router.post('/', async (req, res) => {
-    const client = await pool.connect();
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+router.post('/analyze', async (req, res) => {
+    const { player_id, ai_persona, kinematic_data, snapshot_base64 } = req.body;
+    
+    // Fallbacks for MVP testing
+    const user_id = req.user ? req.user.id : 1; 
+
     try {
-        console.log("📥 RECEIVED PAYLOAD:", req.body); // Tells Render exactly what the frontend sent
+        // THE FIX: Bulletproof wildcard query. It will grab whatever columns actually exist.
+        const playerCheck = await pool.query(
+            'SELECT * FROM players WHERE id = $1',
+            [player_id]
+        );
 
-        // --- THE ULTIMATE PAYLOAD PARSER ---
-        let assessments = [];
-        let quarter = req.body.quarter || 'Q1 2026';
-        let sid = req.body.school_id || 1;
-
-        if (req.body.assessments && Array.isArray(req.body.assessments)) {
-            assessments = req.body.assessments; // Format 1: A labeled list
-        } else if (Array.isArray(req.body)) {
-            assessments = req.body; // Format 2: A direct list
-        } else if (typeof req.body === 'object' && Object.keys(req.body).length > 0) {
-            assessments = [req.body]; // Format 3: A single player object (This is likely what your MVP is doing)
+        if (playerCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Player not found in database." });
         }
 
-        if (!assessments || assessments.length === 0) {
-            console.error("❌ Parser failed to find assessment data.");
-            return res.status(400).json({ success: false, message: "Server did not receive valid data to save." });
+        const player = playerCheck.rows[0];
+
+        // Safely extract names regardless of legacy schema structure
+        const playerName = player.name || `${player.first_name || ''} ${player.last_name || ''}`.trim() || "Athlete";
+        const playerRole = player.role || player.primary_role || "Cricket Player";
+
+        // PROMPT ENGINEERING
+        let systemInstruction = "";
+        if (ai_persona === "The Master") {
+            systemInstruction = "You are an elite batting coach ('The Master'). Analyze the provided kinematic data. Write a supportive but highly analytical 2-paragraph biomechanical assessment for the parents, focusing on batting technique. Do not use complex jargon without explaining it.";
+        } else if (ai_persona === "The Sultan") {
+            systemInstruction = "You are an elite fast-bowling coach ('The Sultan'). Analyze the provided kinematic data. Write a supportive but highly analytical 2-paragraph biomechanical assessment for the parents, focusing on pace bowling mechanics, momentum, and injury prevention.";
+        } else if (ai_persona === "The Magician") {
+            systemInstruction = "You are an elite spin-bowling coach ('The Magician'). Analyze the provided kinematic data. Write a supportive but highly analytical 2-paragraph biomechanical assessment for the parents, focusing on spin mechanics, flight, and body rotation.";
+        } else {
+            systemInstruction = "You are an elite cricket coach. Analyze the provided kinematic data and write a 2-paragraph biomechanical assessment.";
         }
 
-        await client.query('BEGIN'); // Start transaction
-
-        let savedCount = 0;
-
-        for (let act of assessments) {
-            const playerId = act.playerId || act.id || act.player_id || act.userId; 
-            if (!playerId) continue; 
-
-            const physical = Number(act.physical || act.physical_score) || 0;
-            const skill = Number(act.skill || act.skill_score) || 0;
-            const mental = Number(act.mental || act.mental_score) || 0;
-            const coach = Number(act.coach || act.coach_score) || 0;
+        const prompt = `
+            ${systemInstruction}
+            Player Name: ${playerName}
+            Role: ${playerRole}
+            Raw Kinematic Data: ${JSON.stringify(kinematic_data)}
             
-            const totalScore = ((physical + skill + mental + coach) / 4).toFixed(1);
-            
-            let signal = 'Stable';
-            if (totalScore >= 7.5) signal = 'Optimal';
-            else if (totalScore < 5.0) signal = 'At Risk';
+            Generate the official Parent Report text now.
+        `;
 
-            // Insert into assessments table
-            await client.query(
-                `INSERT INTO assessments (user_id, school_id, quarter, physical_score, skill_score, mental_score, coach_score, total_score)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-                [playerId, sid, quarter, physical, skill, mental, coach, totalScore]
-            );
+        console.log(`Triggering Gemini API for ${playerName}...`);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" }); 
+        const result = await model.generateContent(prompt);
+        const aiReport = result.response.text();
 
-            // Update the players table
-            await client.query(
-                `UPDATE players SET latest_score = $1, coach_signal = $2 WHERE id = $3`,
-                [totalScore, signal, playerId]
-            );
-            savedCount++;
-        }
+        // SAVE TO VAULT
+        const insertQuery = `
+            INSERT INTO biomechanical_logs 
+            (player_id, generated_by_user_id, assessment_date, ai_persona, kinematic_data_json, snapshot_base64, ai_generated_report, status)
+            VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, 'Report_Generated')
+            RETURNING *;
+        `;
+        
+        const dbResult = await pool.query(insertQuery, [
+            player_id,
+            user_id,
+            ai_persona,
+            JSON.stringify(kinematic_data),
+            snapshot_base64,
+            aiReport
+        ]);
 
-        await client.query('COMMIT'); 
-        console.log(`✅ Successfully saved ${savedCount} assessments.`);
-        res.status(201).json({ success: true, message: 'Assessments saved successfully' });
-    } catch (err) {
-        await client.query('ROLLBACK'); 
-        console.error('❌ Save Assessment Error:', err);
-        res.status(500).json({ success: false, message: 'Database failed to save', details: err.message });
-    } finally {
-        client.release();
-    }
-});
+        res.status(200).json({
+            success: true,
+            message: "Elite Biomechanical Report generated successfully.",
+            data: dbResult.rows[0]
+        });
 
-// GET: Fetch assessments
-router.get('/', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT * FROM assessments ORDER BY created_at DESC');
-        res.json({ success: true, data: result.rows });
-    } catch (err) {
-        res.status(500).json({ success: false, message: 'Failed to fetch assessments' });
+    } catch (error) {
+        console.error("AI Generation Error:", error);
+        res.status(500).json({ error: "Failed to process biomechanical data and generate AI report." });
     }
 });
 
