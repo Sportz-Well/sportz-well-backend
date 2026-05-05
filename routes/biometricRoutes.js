@@ -51,8 +51,9 @@ router.post('/analyze', async (req, res) => {
 
         console.log(`Triggering Gemini API for ${playerName}...`);
         
-        // THE FIX: Switch to the free-tier friendly Flash model
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); 
+        // THE FIX: Dynamic Env Variable with the free-tier Flash fallback
+        const targetModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+        const model = genAI.getGenerativeModel({ model: targetModel }); 
         
         const result = await model.generateContent(prompt);
         const aiReport = result.response.text();
