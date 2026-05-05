@@ -4,75 +4,48 @@ const router = express.Router();
 const pool = require('../db'); 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Initialize the Google SDK using your secret API key
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// --- 1. THE CREATION ROUTE (POST) ---
 router.post('/analyze', async (req, res) => {
     const { player_id, ai_persona, kinematic_data, snapshot_base64 } = req.body;
-    
-    // Fallbacks for MVP testing
     const user_id = req.user ? req.user.id : 1; 
 
     try {
-        const playerCheck = await pool.query(
-            'SELECT * FROM players WHERE id = $1',
-            [player_id]
-        );
-
+        const playerCheck = await pool.query('SELECT * FROM players WHERE id = $1', [player_id]);
         if (playerCheck.rows.length === 0) {
             return res.status(404).json({ error: "Player not found in database." });
         }
 
         const player = playerCheck.rows[0];
-
-        // Safely extract names regardless of legacy schema structure
         const playerName = player.name || `${player.first_name || ''} ${player.last_name || ''}`.trim() || "Athlete";
         const playerRole = player.role || player.primary_role || "Cricket Player";
 
-        // ==========================================
-        // PROMPT ENGINEERING: THE SWPI MATRIX
-        // ==========================================
-        
-        const biomechanicalRubric = `
-            === SWPI PHYSIOLOGICAL BENCHMARKS ===
-            You must judge the provided kinematic data strictly against these facts:
-
-            BATTING (Front Knee Flexion):
-            - Optimal: 120° to 135° (Athletic base)
-            - Flaw (Stiff): > 145°. Drill to assign: 'Medicine Ball Squat & Throws' to train lower-body load.
-            - Flaw (Collapsing): < 115°. Drill to assign: 'Bungee Cord Resisted Drives' for core stability.
-
-            PACE BOWLING (Front Knee at Delivery):
-            - Optimal (Braced): 165° to 180° (Maximum momentum transfer)
-            - Flaw (Collapsing): < 150° (Leaking pace). Drill to assign: 'Straight-Leg Medball Slams' or 'Hurdle Step-Overs' to train front-leg resistance.
-
-            SPIN BOWLING (Front Knee at Delivery):
-            - Optimal: 140° to 160° (Allows for pivot and body rotation)
-            - Flaw (Too Straight): > 165° (Prevents follow-through). Drill to assign: 'Towel Resistance Rotation'.
-        `;
-
-        const baseCoachRules = `
-            CRITICAL DIRECTIVE: You are an objective, constructive youth cricket coach evaluating a developing junior player.
-            - Speak in simple, layman's terms so parents can easily understand. Avoid complex coaching jargon.
-            - DO NOT over-praise or use words like "elite" or "perfect" if the data shows a flaw. Be honest but encouraging.
-            - Compare their raw numbers to the Optimal benchmarks in the SWPI Matrix.
-            - Prescribe ONLY the specific drills assigned in the SWPI Benchmarks. Do not invent your own drills.
-            - STRICT FORMAT: You MUST respond with exactly 3 concise bullet points. No introductory fluff, no concluding remarks. Start immediately with the bullets.
-              * Bullet 1 (The Numbers): Explain what the specific angle measured means for their body in plain English (Max 2 sentences).
-              * Bullet 2 (Strengths & Flaws): Point out one good thing they are doing, and what specific mechanical flaw the data reveals (Max 2 sentences).
-              * Bullet 3 (The Fix): Name the prescribed SWPI drill and briefly explain how it corrects the flaw (Max 2 sentences).
-        `;
-
+        // PROMPT ENGINEERING: BENCHMARKS & DRILLS
         let systemInstruction = "";
+        const baseRules = `Tone: Honest, strict, and highly analytical. You are evaluating a developing youth player against professional physiological benchmarks. Do NOT sugar-coat the assessment. Do NOT use overly enthusiastic words unless the metrics strictly fall within the optimal professional range.
+        Structure: Write exactly three sections for the parents and coach.
+        Section 1 (The Reality): State the raw kinematic numbers. Judge them strictly against the provided optimal benchmarks.
+        Section 2 (The Flaws): Point out the mechanical flaws, energy leaks, or injury risks caused by these specific angles.
+        Section 3 (The Prescription): Prescribe exactly 2 highly specific physical drills to correct the identified mechanical flaws.`;
 
         if (ai_persona === "The Master") {
-            systemInstruction = `${biomechanicalRubric} ${baseCoachRules} Role: 'The Master' (Batting Coach).`;
+            systemInstruction = `You are an elite, strict batting coach ('The Master'). ${baseRules} 
+            BENCHMARKS: 
+            - Optimal Knee Flexion (Athletic Base): 130° to 150°. 
+            - Optimal Lead Arm Bend (Load): 90° to 120°.`;
         } else if (ai_persona === "The Sultan") {
-            systemInstruction = `${biomechanicalRubric} ${baseCoachRules} Role: 'The Sultan' (Fast-Bowling Coach).`;
+            systemInstruction = `You are an elite, strict fast-bowling coach ('The Sultan'). ${baseRules} 
+            BENCHMARKS:
+            - Optimal Front Knee Angle: 160° to 180°.
+            - Optimal Bowling Arm: Must remain near 180° during delivery.`;
         } else if (ai_persona === "The Magician") {
-            systemInstruction = `${biomechanicalRubric} ${baseCoachRules} Role: 'The Magician' (Spin Coach).`;
+            systemInstruction = `You are an elite, strict spin-bowling coach ('The Magician'). ${baseRules} 
+            BENCHMARKS:
+            - Optimal Front Knee Angle: 140° to 165°.
+            - Optimal Head Alignment: Ratio near 0.00.`;
         } else {
-            systemInstruction = `${biomechanicalRubric} ${baseCoachRules} Role: Youth Cricket Coach.`;
+            systemInstruction = `You are an elite cricket coach. ${baseRules}`;
         }
 
         const prompt = `
@@ -80,19 +53,14 @@ router.post('/analyze', async (req, res) => {
             Player Name: ${playerName}
             Role: ${playerRole}
             Raw Kinematic Data: ${JSON.stringify(kinematic_data)}
-            
             Generate the official Parent Report text now.
         `;
 
-        console.log(`Triggering Gemini API with 3-Bullet Layman Rubric for ${playerName}...`);
-        
-        const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-        const model = genAI.getGenerativeModel({ model: modelName }); 
-        
+        const targetModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+        const model = genAI.getGenerativeModel({ model: targetModel }); 
         const result = await model.generateContent(prompt);
         const aiReport = result.response.text();
 
-        // SAVE TO VAULT
         const insertQuery = `
             INSERT INTO biomechanical_logs 
             (player_id, generated_by_user_id, assessment_date, ai_persona, kinematic_data_json, snapshot_base64, ai_generated_report, status)
@@ -100,24 +68,39 @@ router.post('/analyze', async (req, res) => {
             RETURNING *;
         `;
         
-        const dbResult = await pool.query(insertQuery, [
-            player_id,
-            user_id,
-            ai_persona,
-            JSON.stringify(kinematic_data),
-            snapshot_base64,
-            aiReport
-        ]);
+        const dbResult = await pool.query(insertQuery, [player_id, user_id, ai_persona, JSON.stringify(kinematic_data), snapshot_base64, aiReport]);
 
-        res.status(200).json({
-            success: true,
-            message: "Layman 3-Bullet Biomechanical Report generated successfully.",
-            data: dbResult.rows[0]
-        });
+        res.status(200).json({ success: true, message: "Report generated successfully.", data: dbResult.rows[0] });
 
     } catch (error) {
         console.error("AI Generation Error:", error);
-        res.status(500).json({ error: "Failed to process biomechanical data and generate AI report." });
+        res.status(500).json({ error: "Failed to process data and generate AI report." });
+    }
+});
+
+// --- 2. THE FETCH ROUTE (GET) ---
+// This allows the frontend to pull the generated report automatically
+router.get('/latest/:player_id', async (req, res) => {
+    const { player_id } = req.params;
+    try {
+        const query = `
+            SELECT b.*, p.name, p.first_name, p.last_name, p.primary_role 
+            FROM biomechanical_logs b
+            JOIN players p ON b.player_id = p.id
+            WHERE b.player_id = $1 
+            ORDER BY b.assessment_date DESC, b.id DESC 
+            LIMIT 1;
+        `;
+        const result = await pool.query(query, [player_id]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: "No biomechanical report found for this player." });
+        }
+        
+        res.status(200).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+        console.error("Fetch Error:", error);
+        res.status(500).json({ error: "Failed to retrieve the report." });
     }
 });
 
