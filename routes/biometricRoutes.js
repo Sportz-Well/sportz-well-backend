@@ -51,8 +51,8 @@ router.post('/analyze', async (req, res) => {
 
         console.log(`Triggering Gemini API for ${playerName}...`);
         
-        // THE FIX: Pointing to the current, active Gemini 2.5 Pro model
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" }); 
+        // THE FIX: Switch to the free-tier friendly Flash model
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); 
         
         const result = await model.generateContent(prompt);
         const aiReport = result.response.text();
