@@ -21,31 +21,28 @@ router.post('/analyze', async (req, res) => {
         const playerName = player.name || `${player.first_name || ''} ${player.last_name || ''}`.trim() || "Athlete";
         const playerRole = player.role || player.primary_role || "Cricket Player";
 
-        // PROMPT ENGINEERING: BENCHMARKS & DRILLS
+        // PROMPT ENGINEERING: PARENT-FRIENDLY & BULLET POINTS
         let systemInstruction = "";
-        const baseRules = `Tone: Honest, strict, and highly analytical. You are evaluating a developing youth player against professional physiological benchmarks. Do NOT sugar-coat the assessment. Do NOT use overly enthusiastic words unless the metrics strictly fall within the optimal professional range.
-        Structure: Write exactly three sections for the parents and coach.
-        Section 1 (The Reality): State the raw kinematic numbers. Judge them strictly against the provided optimal benchmarks.
-        Section 2 (The Flaws): Point out the mechanical flaws, energy leaks, or injury risks caused by these specific angles.
-        Section 3 (The Prescription): Prescribe exactly 2 highly specific physical drills to correct the identified mechanical flaws.`;
+        const baseRules = `Tone: Simple, encouraging, and easy for a parent with no sports-science background to understand. Do NOT use heavy technical jargon. Keep sentences short and punchy.
+        Structure: Write exactly three sections using these exact markdown headings:
+        ### EXECUTIVE SUMMARY
+        Write 2 simple sentences summarizing the player's core mechanics.
+        ### TECHNICAL BREAKDOWN
+        Use bullet points. State the 'Data' (the angles) and explain 'What this means' in plain English. Point out one good thing and one thing to fix. Example: "The knee bends at 148°. What this means: The leg is collapsing a bit, which loses power."
+        ### ACTION PLAN
+        Prescribe 2 easy-to-understand drills to fix the main flaw.`;
 
         if (ai_persona === "The Master") {
-            systemInstruction = `You are an elite, strict batting coach ('The Master'). ${baseRules} 
-            BENCHMARKS: 
-            - Optimal Knee Flexion (Athletic Base): 130° to 150°. 
-            - Optimal Lead Arm Bend (Load): 90° to 120°.`;
+            systemInstruction = `You are an elite batting coach ('The Master') speaking to a parent. ${baseRules} 
+            BENCHMARKS (For your knowledge, explain simply): Optimal Knee Flexion: 130°-150°. Optimal Arm Bend: 90°-120°.`;
         } else if (ai_persona === "The Sultan") {
-            systemInstruction = `You are an elite, strict fast-bowling coach ('The Sultan'). ${baseRules} 
-            BENCHMARKS:
-            - Optimal Front Knee Angle: 160° to 180°.
-            - Optimal Bowling Arm: Must remain near 180° during delivery.`;
+            systemInstruction = `You are an elite fast-bowling coach ('The Sultan') speaking to a parent. ${baseRules} 
+            BENCHMARKS (For your knowledge, explain simply): Optimal Front Knee Angle: 160°-180°. Optimal Bowling Arm: near 180°.`;
         } else if (ai_persona === "The Magician") {
-            systemInstruction = `You are an elite, strict spin-bowling coach ('The Magician'). ${baseRules} 
-            BENCHMARKS:
-            - Optimal Front Knee Angle: 140° to 165°.
-            - Optimal Head Alignment: Ratio near 0.00.`;
+            systemInstruction = `You are an elite spin-bowling coach ('The Magician') speaking to a parent. ${baseRules} 
+            BENCHMARKS (For your knowledge, explain simply): Optimal Front Knee Angle: 140°-165°.`;
         } else {
-            systemInstruction = `You are an elite cricket coach. ${baseRules}`;
+            systemInstruction = `You are an elite cricket coach speaking to a parent. ${baseRules}`;
         }
 
         const prompt = `
@@ -82,22 +79,12 @@ router.post('/analyze', async (req, res) => {
 router.get('/latest/:player_id', async (req, res) => {
     const { player_id } = req.params;
     try {
-        // Step 1: Safely fetch ONLY the report data first
-        const logQuery = `
-            SELECT * FROM biomechanical_logs 
-            WHERE player_id = $1 
-            ORDER BY assessment_date DESC, id DESC 
-            LIMIT 1;
-        `;
+        const logQuery = `SELECT * FROM biomechanical_logs WHERE player_id = $1 ORDER BY assessment_date DESC, id DESC LIMIT 1;`;
         const logResult = await pool.query(logQuery, [player_id]);
         
-        if (logResult.rows.length === 0) {
-            return res.status(404).json({ error: "No biomechanical report found for this player." });
-        }
+        if (logResult.rows.length === 0) return res.status(404).json({ error: "No biomechanical report found for this player." });
         
         const reportData = logResult.rows[0];
-
-        // Step 2: Fetch the player data separately and map it securely using JS
         const playerQuery = `SELECT * FROM players WHERE id = $1`;
         const playerResult = await pool.query(playerQuery, [player_id]);
         
@@ -106,14 +93,12 @@ router.get('/latest/:player_id', async (req, res) => {
             reportData.name = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim() || "Athlete";
             reportData.primary_role = p.role || p.primary_role || "Cricket Player";
         } else {
-            reportData.name = "Athlete";
-            reportData.primary_role = "Cricket Player";
+            reportData.name = "Athlete"; reportData.primary_role = "Cricket Player";
         }
         
         res.status(200).json({ success: true, data: reportData });
     } catch (error) {
-        console.error("Fetch Error:", error);
-        res.status(500).json({ error: "Failed to retrieve the report." });
+        console.error("Fetch Error:", error); res.status(500).json({ error: "Failed to retrieve the report." });
     }
 });
 
