@@ -51,8 +51,8 @@ router.post('/analyze', async (req, res) => {
 
         console.log(`Triggering Gemini API for ${playerName}...`);
         
-        // THE FIX: Using the universally supported "gemini-pro" string for the legacy SDK
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" }); 
+        // THE FIX: Pointing to the current, active Gemini 2.5 Pro model
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" }); 
         
         const result = await model.generateContent(prompt);
         const aiReport = result.response.text();
