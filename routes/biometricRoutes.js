@@ -79,25 +79,38 @@ router.post('/analyze', async (req, res) => {
 });
 
 // --- 2. THE FETCH ROUTE (GET) ---
-// This allows the frontend to pull the generated report automatically
 router.get('/latest/:player_id', async (req, res) => {
     const { player_id } = req.params;
     try {
-        const query = `
-            SELECT b.*, p.name, p.first_name, p.last_name, p.primary_role 
-            FROM biomechanical_logs b
-            JOIN players p ON b.player_id = p.id
-            WHERE b.player_id = $1 
-            ORDER BY b.assessment_date DESC, b.id DESC 
+        // Step 1: Safely fetch ONLY the report data first
+        const logQuery = `
+            SELECT * FROM biomechanical_logs 
+            WHERE player_id = $1 
+            ORDER BY assessment_date DESC, id DESC 
             LIMIT 1;
         `;
-        const result = await pool.query(query, [player_id]);
+        const logResult = await pool.query(logQuery, [player_id]);
         
-        if (result.rows.length === 0) {
+        if (logResult.rows.length === 0) {
             return res.status(404).json({ error: "No biomechanical report found for this player." });
         }
         
-        res.status(200).json({ success: true, data: result.rows[0] });
+        const reportData = logResult.rows[0];
+
+        // Step 2: Fetch the player data separately and map it securely using JS
+        const playerQuery = `SELECT * FROM players WHERE id = $1`;
+        const playerResult = await pool.query(playerQuery, [player_id]);
+        
+        if (playerResult.rows.length > 0) {
+            const p = playerResult.rows[0];
+            reportData.name = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim() || "Athlete";
+            reportData.primary_role = p.role || p.primary_role || "Cricket Player";
+        } else {
+            reportData.name = "Athlete";
+            reportData.primary_role = "Cricket Player";
+        }
+        
+        res.status(200).json({ success: true, data: reportData });
     } catch (error) {
         console.error("Fetch Error:", error);
         res.status(500).json({ error: "Failed to retrieve the report." });
