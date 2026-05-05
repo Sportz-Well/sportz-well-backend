@@ -13,7 +13,6 @@ router.post('/analyze', async (req, res) => {
     const user_id = req.user ? req.user.id : 1; 
 
     try {
-        // Bulletproof wildcard query
         const playerCheck = await pool.query(
             'SELECT * FROM players WHERE id = $1',
             [player_id]
@@ -52,8 +51,8 @@ router.post('/analyze', async (req, res) => {
 
         console.log(`Triggering Gemini API for ${playerName}...`);
         
-        // THE FIX: Appended '-latest' to satisfy the Google Generative AI SDK requirement
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" }); 
+        // THE FIX: Using the universally supported "gemini-pro" string for the legacy SDK
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" }); 
         
         const result = await model.generateContent(prompt);
         const aiReport = result.response.text();
