@@ -13,7 +13,7 @@ router.post('/analyze', async (req, res) => {
     const user_id = req.user ? req.user.id : 1; 
 
     try {
-        // THE FIX: Bulletproof wildcard query. It will grab whatever columns actually exist.
+        // Bulletproof wildcard query
         const playerCheck = await pool.query(
             'SELECT * FROM players WHERE id = $1',
             [player_id]
@@ -51,7 +51,10 @@ router.post('/analyze', async (req, res) => {
         `;
 
         console.log(`Triggering Gemini API for ${playerName}...`);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" }); 
+        
+        // THE FIX: Appended '-latest' to satisfy the Google Generative AI SDK requirement
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" }); 
+        
         const result = await model.generateContent(prompt);
         const aiReport = result.response.text();
 
