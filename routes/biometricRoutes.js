@@ -46,9 +46,11 @@ async function fetchFromGeminiWithRetry(model, prompt, retries = 3) {
     }
 }
 
+// ---------------------------------------------------------
+// ROUTE 1: ANALYZE AND SAVE THE REPORT
+// ---------------------------------------------------------
 router.post('/analyze', async (req, res) => {
     const { player_id, ai_persona, kinematic_data, snapshot_base64 } = req.body;
-    
     const user_id = req.user ? req.user.id : 1; 
 
     try {
@@ -142,6 +144,39 @@ router.post('/analyze', async (req, res) => {
     } catch (error) {
         console.error("AI Generation Fatal Error:", error);
         res.status(500).json({ error: "Failed to process biomechanical data and generate AI report." });
+    }
+});
+
+// ---------------------------------------------------------
+// ROUTE 2: FETCH THE LATEST REPORT FOR THE UI
+// ---------------------------------------------------------
+router.get('/latest/:player_id', async (req, res) => {
+    try {
+        const { player_id } = req.params;
+        
+        const fetchQuery = `
+            SELECT b.*, p.name, p.first_name, p.last_name, p.role as primary_role
+            FROM biomechanical_logs b
+            JOIN players p ON b.player_id = p.id
+            WHERE b.player_id = $1
+            ORDER BY b.id DESC
+            LIMIT 1;
+        `;
+        
+        const result = await pool.query(fetchQuery, [player_id]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: "No reports found for this player." });
+        }
+        
+        res.status(200).json({
+            success: true,
+            data: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error("Database Fetch Error:", error);
+        res.status(500).json({ error: "Failed to fetch the latest report from the database." });
     }
 });
 
