@@ -61,7 +61,7 @@ router.post('/analyze', async (req, res) => {
         }
 
         const player = playerCheck.rows[0];
-        const playerName = player.name || `${player.first_name || ''} ${player.last_name || ''}`.trim() || "Athlete";
+        const playerName = player.name || "Athlete";
         const playerRole = player.role || player.primary_role || "Cricket Player";
 
         const biomechanicalRubric = `
@@ -109,7 +109,6 @@ router.post('/analyze', async (req, res) => {
         const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
         const model = genAI.getGenerativeModel({ model: modelName }); 
         
-        // Use our new Enterprise Retry Wrapper
         let aiReport = await fetchFromGeminiWithRetry(model, prompt);
 
         // Safety cleanup for markdown backticks
@@ -148,30 +147,33 @@ router.post('/analyze', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// ROUTE 2: FETCH THE LATEST REPORT FOR THE UI
+// ROUTE 2: FETCH THE LATEST REPORT FOR THE UI (BUG FIXED)
 // ---------------------------------------------------------
 router.get('/latest/:player_id', async (req, res) => {
     try {
         const { player_id } = req.params;
         
-        const fetchQuery = `
-            SELECT b.*, p.name, p.first_name, p.last_name, p.role as primary_role
-            FROM biomechanical_logs b
-            JOIN players p ON b.player_id = p.id
-            WHERE b.player_id = $1
-            ORDER BY b.id DESC
-            LIMIT 1;
-        `;
+        // Query 1: Get the actual report safely
+        const logCheck = await pool.query(
+            'SELECT * FROM biomechanical_logs WHERE player_id = $1 ORDER BY id DESC LIMIT 1', 
+            [player_id]
+        );
         
-        const result = await pool.query(fetchQuery, [player_id]);
-        
-        if (result.rows.length === 0) {
+        if (logCheck.rows.length === 0) {
             return res.status(404).json({ error: "No reports found for this player." });
         }
-        
+        const logData = logCheck.rows[0];
+
+        // Query 2: Get the player info safely
+        const playerCheck = await pool.query('SELECT * FROM players WHERE id = $1', [player_id]);
+        const playerData = playerCheck.rows.length > 0 ? playerCheck.rows[0] : {};
+
+        // Merge them together cleanly for the frontend UI
+        const combinedData = { ...playerData, ...logData };
+
         res.status(200).json({
             success: true,
-            data: result.rows[0]
+            data: combinedData
         });
 
     } catch (error) {
