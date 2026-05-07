@@ -134,8 +134,9 @@ router.get('/latest/:player_id', async (req, res) => {
         }
 
         // Query 2: Get player info safely (only asking for columns we know exist)
+        // BUG FIX: Removed 'first_name' and 'last_name' which caused the 500 error
         const playerCheck = await pool.query(
-            'SELECT id, name, role, primary_role FROM players WHERE id = $1', 
+            'SELECT id, name, role FROM players WHERE id = $1', 
             [player_id]
         );
         
