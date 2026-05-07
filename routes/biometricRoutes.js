@@ -87,12 +87,10 @@ router.post('/analyze', async (req, res) => {
 
         console.log(`Triggering SWPI Engine for Player ID ${player_id}...`);
         
-        // Upgraded to 1.5-pro for maximum stability and reduced 503 errors
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" }); 
         
         let aiReport = await fetchFromGeminiWithRetry(model, prompt);
 
-        // Safety cleanup for markdown backticks
         if (aiReport.startsWith('```json')) aiReport = aiReport.replace(/```json/g, '');
         if (aiReport.startsWith('```')) aiReport = aiReport.replace(/```/g, '');
         aiReport = aiReport.trim();
@@ -117,13 +115,13 @@ router.post('/analyze', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// ROUTE 2: FETCH THE LATEST REPORT (ULTRA-SAFE FIX)
+// ROUTE 2: FETCH THE LATEST REPORT (BUG FIXED)
 // ---------------------------------------------------------
 router.get('/latest/:player_id', async (req, res) => {
     try {
         const { player_id } = req.params;
         
-        // Query 1: Get reports safely
+        // 1. Get the reports safely
         const logCheck = await pool.query(
             'SELECT * FROM biomechanical_logs WHERE player_id = $1 ORDER BY id DESC LIMIT 5', 
             [player_id]
@@ -133,8 +131,7 @@ router.get('/latest/:player_id', async (req, res) => {
             return res.status(404).json({ success: false, error: "No reports found for this player." });
         }
 
-        // Query 2: Get player info safely (only asking for columns we know exist)
-        // BUG FIX: Removed 'first_name' and 'last_name' which caused the 500 error
+        // 2. Get the player info safely using ONLY the existing 'name' and 'role' columns
         const playerCheck = await pool.query(
             'SELECT id, name, role FROM players WHERE id = $1', 
             [player_id]
@@ -152,7 +149,6 @@ router.get('/latest/:player_id', async (req, res) => {
 
     } catch (error) {
         console.error("Database Fetch Error:", error);
-        // Expose the real error safely for debugging
         res.status(500).json({ success: false, error: "Database Fetch Failed", details: error.message });
     }
 });
