@@ -2,44 +2,42 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db'); 
 
-// --- 1. FETCH ALL PLAYERS (Used by Directory & Squad Evaluation) ---
+// --- 1. FETCH ALL PLAYERS ---
 router.get('/', async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM players ORDER BY id DESC');
+        // Removed 'ORDER BY id' to prevent crashes if the ID column is named differently
+        const result = await pool.query('SELECT * FROM players');
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
-        console.error("Database Fetch Error:", error);
-        res.status(500).json({ error: "Failed to fetch players from database." });
+        console.error("GET Players Error:", error.message);
+        // DIAGNOSTIC HACK: Send the exact SQL error directly to the frontend
+        res.status(500).json({ error: `DB Error: ${error.message}` });
     }
 });
 
-// --- 2. ADD NEW PLAYER (With SAFE Strict Null Checking) ---
+// --- 2. ADD NEW PLAYER ---
 router.post('/', async (req, res) => {
     try {
-        const { first_name, last_name, primary_role } = req.body;
+        const { name, first_name, last_name, role, primary_role } = req.body;
 
-        // SAFE NULL CHECK: Prevents server crashes if fields are entirely missing
-        if (!first_name || typeof first_name !== 'string' || first_name.trim() === '') {
-            return res.status(400).json({ error: "First name is strictly required." });
-        }
+        // Map frontend inputs to the actual DB schema safely
+        const finalName = name || (first_name ? `${first_name} ${last_name || ''}`.trim() : 'Unknown Athlete');
+        const finalRole = role || primary_role || 'Cricket Player';
 
-        // Safely parse optional fields
-        const safeLastName = (last_name && typeof last_name === 'string') ? last_name.trim() : '';
-        const safeRole = (primary_role && typeof primary_role === 'string') ? primary_role.trim() : 'Cricket Player';
-
+        // Assuming database uses 'name' and 'role' based on previous biometric route architecture
         const insertQuery = `
-            INSERT INTO players (first_name, last_name, primary_role)
-            VALUES ($1, $2, $3)
+            INSERT INTO players (name, role)
+            VALUES ($1, $2)
             RETURNING *;
         `;
         
-        const result = await pool.query(insertQuery, [first_name.trim(), safeLastName, safeRole]);
-
+        const result = await pool.query(insertQuery, [finalName, finalRole]);
         res.status(201).json({ success: true, message: "Player added successfully.", data: result.rows[0] });
 
     } catch (error) {
-        console.error("Player Insertion Error:", error);
-        res.status(500).json({ error: "Failed to insert player into database." });
+        console.error("POST Player Error:", error.message);
+        // DIAGNOSTIC HACK: Send the exact SQL error directly to the frontend
+        res.status(500).json({ error: `DB Error: ${error.message}` });
     }
 });
 
