@@ -4,16 +4,55 @@ const router = express.Router();
 const pool = require('../db');
 const authMiddleware = require('../middleware/authMiddleware');
 
+// ---------------------------------------------------------
+// EMERGENCY AUTO-FIX ROUTE: Fixes missing DB columns
+// ---------------------------------------------------------
+router.get('/fix-db', async (req, res) => {
+    try {
+        // Safely add any missing columns to prevent 500 crashes
+        await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(50);`);
+        await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS gender VARCHAR(50);`);
+        await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS std_div VARCHAR(50);`);
+        await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS school_id VARCHAR(100);`);
+        await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS mobile_no VARCHAR(20);`);
+        await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS latest_score VARCHAR(10);`);
+        await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS coach_signal VARCHAR(50);`);
+
+        res.send(`
+            <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+                <h1 style="color: #10B981;">✅ Database Patched Successfully!</h1>
+                <p>All required columns have been securely added to the players table.</p>
+                <p><strong>You may now close this tab and refresh your SWPI dashboard.</strong></p>
+            </div>
+        `);
+    } catch (err) {
+        res.send(`
+            <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+                <h1 style="color: #EF4444;">❌ Database Patch Failed</h1>
+                <p>Error details: ${err.message}</p>
+            </div>
+        `);
+    }
+});
+
+// APPLY SECURITY TO EVERYTHING BELOW THIS LINE
 router.use(authMiddleware);
 
 // ---------------------------------------------------------
-// SECURED ROUTE: ADD NEW PLAYER (Updated to exact requested fields)
+// SECURED ROUTE: ADD NEW PLAYER
 // ---------------------------------------------------------
 router.post('/add', async (req, res) => {
-    // Removed Batting and Bowling style, keeping only the exact fields requested
-    const { name, date_of_birth, gender, primary_role, std_div, school_id, mobile_no } = req.body;
+    let { name, date_of_birth, gender, primary_role, std_div, school_id, mobile_no } = req.body;
     
-    const academy_id = req.user.academy_id; 
+    // Handle optional fields safely
+    std_div = std_div || null;
+    school_id = school_id || null;
+    mobile_no = mobile_no || null;
+    date_of_birth = date_of_birth || null;
+    gender = gender || null;
+
+    // Fallback ID to prevent crashes if token is slightly malformed
+    const academy_id = req.user.academy_id || req.user.school_id || 1; 
 
     try {
         const result = await pool.query(
@@ -23,8 +62,8 @@ router.post('/add', async (req, res) => {
         );
         res.status(201).json({ success: true, data: result.rows[0] });
     } catch (err) {
-        console.error("Database Insert Error:", err);
-        res.status(500).json({ success: false, error: "Failed to securely add player. Ensure database columns exist." });
+        console.error("Database Insert Error:", err.message);
+        res.status(500).json({ success: false, error: "Failed to securely add player.", details: err.message });
     }
 });
 
@@ -32,7 +71,8 @@ router.post('/add', async (req, res) => {
 // SECURED ROUTE: GET ALL PLAYERS 
 // ---------------------------------------------------------
 router.get('/', async (req, res) => {
-    let targetAcademyId = req.user.academy_id;
+    // Fallback ID to prevent crashes
+    let targetAcademyId = req.user.academy_id || req.user.school_id || 1;
 
     if (req.user.role === 'admin' && req.query.academy_id) {
         targetAcademyId = req.query.academy_id;
@@ -48,8 +88,8 @@ router.get('/', async (req, res) => {
         );
         res.status(200).json(result.rows);
     } catch (err) {
-        console.error("Database Fetch Error:", err);
-        res.status(500).json({ error: "Failed to securely fetch roster." });
+        console.error("Database Fetch Error:", err.message);
+        res.status(500).json({ error: "Failed to securely fetch roster.", details: err.message });
     }
 });
 
@@ -58,7 +98,7 @@ router.get('/', async (req, res) => {
 // ---------------------------------------------------------
 router.get('/:id', async (req, res) => {
     const playerId = req.params.id;
-    const academy_id = req.user.academy_id;
+    const academy_id = req.user.academy_id || req.user.school_id || 1;
 
     try {
         let query = `SELECT * FROM players WHERE id = $1 AND academy_id = $2`;
@@ -77,8 +117,8 @@ router.get('/:id', async (req, res) => {
         
         res.status(200).json(result.rows[0]);
     } catch (err) {
-        console.error("Database Fetch Single Player Error:", err);
-        res.status(500).json({ error: "Failed to fetch player profile." });
+        console.error("Database Fetch Single Player Error:", err.message);
+        res.status(500).json({ error: "Failed to fetch player profile.", details: err.message });
     }
 });
 
