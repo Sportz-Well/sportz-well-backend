@@ -25,6 +25,13 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: "No assessment data provided." });
         }
 
+        // Get school_id from first player in database
+        const schoolResult = await pool.query(
+            `SELECT school_id FROM players WHERE id = $1 LIMIT 1`,
+            [assessments[0].player_id]
+        );
+        const school_id = schoolResult.rows[0]?.school_id || 1;
+
         await client.query('BEGIN');
 
         for (let item of assessments) {
@@ -40,9 +47,9 @@ router.post('/', async (req, res) => {
 
             await client.query(
                 `INSERT INTO weekly_assessments 
-                    (player_id, assessment_date, physical_score, technical_score, mental_score, match_score)
-                 VALUES ($1, CURRENT_DATE, $2, $3, $4, $5)`,
-                [player_id, physical_score, technical_score, mental_score, match_score]
+                    (player_id, school_id, assessment_date, physical_score, technical_score, mental_score, match_score)
+                 VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6)`,
+                [player_id, school_id, physical_score, technical_score, mental_score, match_score]
             );
         }
 
