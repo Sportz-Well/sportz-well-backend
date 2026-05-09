@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const router = express.Router();
-const pool = require('../config/db');
+const pool = require('../db');
 
 // -------------------------------------------------------
 // AUTO-MIGRATION: Adds match_score column if it doesn't exist
@@ -15,7 +15,7 @@ const pool = require('../config/db');
         `);
         console.log('✅ weekly_assessments.match_score column verified.');
     } catch (err) {
-        console.error('⚠️ Migration check failed (non-critical):', err.message);
+        console.error('⚠️ Migration check failed:', err.message);
     }
 })();
 
