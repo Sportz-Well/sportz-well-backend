@@ -18,7 +18,8 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const authRoutes = require('./routes/authRoutes');
 const playerRoutes = require('./routes/playerRoutes');
 const biometricRoutes = require('./routes/biometricRoutes');
-const operationsRoutes = require('./routes/operationsRoutes'); // THIS WAS MISSING
+const operationsRoutes = require('./routes/operationsRoutes');
+const assessmentRoutes = require('./routes/assessmentRoutes');
 
 // ==========================================
 // ROUTE REGISTRATION
@@ -26,7 +27,8 @@ const operationsRoutes = require('./routes/operationsRoutes'); // THIS WAS MISSI
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/players', playerRoutes);
 app.use('/api/v1/biometrics', biometricRoutes);
-app.use('/api/v1/operations', operationsRoutes); // THIS WAS MISSING
+app.use('/api/v1/operations', operationsRoutes);
+app.use('/api/v1/assessments', assessmentRoutes);
 
 // ==========================================
 // SERVER INITIALIZATION
