@@ -8,9 +8,6 @@ const authenticate = require('../middleware/authMiddleware');
 router.get('/', authenticate, async (req, res) => {
     try {
         const academy_id = req.user.academy_id;
-
-        // Global admin (academy_id = 0) sees all players
-        // Everyone else only sees their own academy's players
         let result;
         if (academy_id === 0) {
             result = await pool.query('SELECT * FROM players ORDER BY name ASC');
@@ -20,7 +17,6 @@ router.get('/', authenticate, async (req, res) => {
                 [academy_id]
             );
         }
-
         res.status(200).json({ success: true, data: result.rows });
     } catch (error) {
         console.error("GET Players Error:", error.message);
@@ -28,26 +24,70 @@ router.get('/', authenticate, async (req, res) => {
     }
 });
 
-// --- 2. ADD NEW PLAYER (Protected) ---
+// --- 2. ADD NEW PLAYER — main route POST / ---
 router.post('/', authenticate, async (req, res) => {
     try {
         const academy_id = req.user.academy_id;
-        const { name, first_name, last_name, role, primary_role } = req.body;
+        const { name, first_name, last_name, role, primary_role, date_of_birth, gender, std_div, school_id, mobile_no } = req.body;
 
         const finalName = name || (first_name ? `${first_name} ${last_name || ''}`.trim() : 'Unknown Athlete');
         const finalRole = role || primary_role || 'Cricket Player';
 
         const insertQuery = `
-            INSERT INTO players (name, role, academy_id)
-            VALUES ($1, $2, $3)
+            INSERT INTO players (name, role, academy_id, date_of_birth, gender, std_div, school_id, mobile_no)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *;
         `;
 
-        const result = await pool.query(insertQuery, [finalName, finalRole, academy_id]);
+        const result = await pool.query(insertQuery, [
+            finalName,
+            finalRole,
+            academy_id,
+            date_of_birth || null,
+            gender || null,
+            std_div || null,
+            school_id || null,
+            mobile_no || null
+        ]);
+
         res.status(201).json({ success: true, message: "Player added successfully.", data: result.rows[0] });
 
     } catch (error) {
         console.error("POST Player Error:", error.message);
+        res.status(500).json({ error: `DB Error: ${error.message}` });
+    }
+});
+
+// --- 3. ADD NEW PLAYER — /add alias so both routes work ---
+router.post('/add', authenticate, async (req, res) => {
+    try {
+        const academy_id = req.user.academy_id;
+        const { name, role, primary_role, date_of_birth, gender, std_div, school_id, mobile_no } = req.body;
+
+        const finalName = name || 'Unknown Athlete';
+        const finalRole = role || primary_role || 'Cricket Player';
+
+        const insertQuery = `
+            INSERT INTO players (name, role, academy_id, date_of_birth, gender, std_div, school_id, mobile_no)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING *;
+        `;
+
+        const result = await pool.query(insertQuery, [
+            finalName,
+            finalRole,
+            academy_id,
+            date_of_birth || null,
+            gender || null,
+            std_div || null,
+            school_id || null,
+            mobile_no || null
+        ]);
+
+        res.status(201).json({ success: true, message: "Player added successfully.", data: result.rows[0] });
+
+    } catch (error) {
+        console.error("POST /add Player Error:", error.message);
         res.status(500).json({ error: `DB Error: ${error.message}` });
     }
 });
