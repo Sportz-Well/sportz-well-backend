@@ -19,7 +19,7 @@ router.post('/login', async (req, res) => {
             // Sign a token valid for 24 hours
             const token = jwt.sign(
                 { email, role, academy_id }, 
-                process.env.JWT_SECRET || 'swpi-secret-key', 
+                process.env.JWT_SECRET || 'swpi-production-secret-2026', 
                 { expiresIn: '24h' }
             );
             
@@ -32,7 +32,7 @@ router.post('/login', async (req, res) => {
             });
         }
 
-        // 2. STANDARD DB CHECK (For real users in Phase 3)
+        // 2. STANDARD DB CHECK (For real users)
         const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
         if (result.rows.length === 0) {
             return res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -42,12 +42,12 @@ router.post('/login', async (req, res) => {
 
         // 3. SMART PASSWORD CHECK (Handles both bcrypt and plain text gracefully)
         let isMatch = false;
-        const dbPassword = user.password_hash || user.password; // Handle new DB schema
+        const dbPassword = user.password_hash || user.password;
         
         if (dbPassword && (dbPassword.startsWith('$2b$') || dbPassword.startsWith('$2a$'))) {
             isMatch = await bcrypt.compare(password, dbPassword);
         } else {
-            isMatch = (password === dbPassword); // Fallback for old plaintext passwords
+            isMatch = (password === dbPassword);
         }
 
         if (!isMatch) {
@@ -57,7 +57,7 @@ router.post('/login', async (req, res) => {
         // 4. SUCCESS
         const token = jwt.sign(
             { id: user.id, email: user.email, role: user.role, academy_id: user.academy_id },
-            process.env.JWT_SECRET || 'swpi-secret-key',
+            process.env.JWT_SECRET || 'swpi-production-secret-2026',
             { expiresIn: '24h' }
         );
 
