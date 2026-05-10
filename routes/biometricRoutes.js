@@ -1,8 +1,9 @@
-// routes/biometricRoutes.js
+'use strict';
 const express = require('express');
 const router = express.Router();
-const pool = require('../db'); 
+const pool = require('../db');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const authenticate = require('../middleware/authMiddleware');
 
 // Initialize the Google SDK
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -18,7 +19,7 @@ async function fetchFromGeminiWithRetry(model, prompt, retries = 3) {
         } catch (error) {
             console.error(`[Attempt ${i + 1}] API Error:`, error.message);
             if (error.status === 503 && i < retries - 1) {
-                const waitTime = Math.pow(2, i) * 1500; 
+                const waitTime = Math.pow(2, i) * 1500;
                 console.log(`Server busy. Retrying in ${waitTime}ms...`);
                 await new Promise(res => setTimeout(res, waitTime));
             } else if (i === retries - 1) {
@@ -37,14 +38,27 @@ async function fetchFromGeminiWithRetry(model, prompt, retries = 3) {
 }
 
 // ---------------------------------------------------------
-// ROUTE 1: ANALYZE AND SAVE (WITH RATE LIMITING)
+// ROUTE 1: ANALYZE AND SAVE (Protected)
 // ---------------------------------------------------------
-router.post('/analyze', async (req, res) => {
+router.post('/analyze', authenticate, async (req, res) => {
     const { player_id, ai_persona, kinematic_data, snapshot_base64 } = req.body;
-    const user_id = req.user ? req.user.id : 1; 
+    const user_id = req.user.id;
+    const secureAcademyId = req.user.academy_id;
 
     try {
-        // --- BUSINESS RULE: 1 REPORT PER MONTH ---
+        // Security check: confirm this player belongs to the coach's academy
+        const playerCheck = await pool.query(
+            'SELECT * FROM players WHERE id = $1 AND academy_id = $2',
+            [player_id, secureAcademyId]
+        );
+
+        if (playerCheck.rows.length === 0) {
+            return res.status(403).json({ error: "Access denied or Player not found." });
+        }
+
+        const player = playerCheck.rows[0];
+
+        // Business rule: 1 report per player per month
         const rateLimitCheck = await pool.query(`
             SELECT id FROM biomechanical_logs 
             WHERE player_id = $1 
@@ -53,20 +67,11 @@ router.post('/analyze', async (req, res) => {
         `, [player_id]);
 
         if (rateLimitCheck.rows.length > 0) {
-            return res.status(429).json({ 
-                success: false, 
-                error: "Rate Limit Exceeded: Head Coach is restricted to 1 Biomechanical Report per player, per month." 
+            return res.status(429).json({
+                success: false,
+                error: "Rate Limit Exceeded: Head Coach is restricted to 1 Biomechanical Report per player, per month."
             });
         }
-        // -----------------------------------------
-
-        const playerCheck = await pool.query('SELECT * FROM players WHERE id = $1', [player_id]);
-
-        if (playerCheck.rows.length === 0) {
-            return res.status(404).json({ error: "Player not found in database." });
-        }
-
-        const player = playerCheck.rows[0];
 
         const prompt = `
             STRICT DIRECTIVE: You are the SWPI Master Biomechanical Engine. 
@@ -86,9 +91,8 @@ router.post('/analyze', async (req, res) => {
         `;
 
         console.log(`Triggering SWPI Engine for Player ID ${player_id}...`);
-        
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" }); 
-        
+
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
         let aiReport = await fetchFromGeminiWithRetry(model, prompt);
 
         if (aiReport.startsWith('```json')) aiReport = aiReport.replace(/```json/g, '');
@@ -101,7 +105,7 @@ router.post('/analyze', async (req, res) => {
             VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, 'Report_Generated')
             RETURNING *;
         `;
-        
+
         const dbResult = await pool.query(insertQuery, [
             player_id, user_id, ai_persona, JSON.stringify(kinematic_data), snapshot_base64, aiReport
         ]);
@@ -115,29 +119,33 @@ router.post('/analyze', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// ROUTE 2: FETCH THE LATEST REPORT (BUG FIXED)
+// ROUTE 2: FETCH THE LATEST REPORT (Protected)
 // ---------------------------------------------------------
-router.get('/latest/:player_id', async (req, res) => {
+router.get('/latest/:player_id', authenticate, async (req, res) => {
     try {
         const { player_id } = req.params;
-        
-        // 1. Get the reports safely
+        const secureAcademyId = req.user.academy_id;
+
+        // Security check: confirm this player belongs to the coach's academy
+        const playerCheck = await pool.query(
+            'SELECT id, name, role FROM players WHERE id = $1 AND academy_id = $2',
+            [player_id, secureAcademyId]
+        );
+
+        if (playerCheck.rows.length === 0) {
+            return res.status(403).json({ error: "Access denied or Player not found." });
+        }
+
+        const playerData = playerCheck.rows[0];
+
         const logCheck = await pool.query(
-            'SELECT * FROM biomechanical_logs WHERE player_id = $1 ORDER BY id DESC LIMIT 5', 
+            'SELECT * FROM biomechanical_logs WHERE player_id = $1 ORDER BY id DESC LIMIT 5',
             [player_id]
         );
-        
+
         if (logCheck.rows.length === 0) {
             return res.status(404).json({ success: false, error: "No reports found for this player." });
         }
-
-        // 2. Get the player info safely using ONLY the existing 'name' and 'role' columns
-        const playerCheck = await pool.query(
-            'SELECT id, name, role FROM players WHERE id = $1', 
-            [player_id]
-        );
-        
-        const playerData = playerCheck.rows.length > 0 ? playerCheck.rows[0] : { name: "Unknown Athlete" };
 
         res.status(200).json({
             success: true,
