@@ -31,12 +31,28 @@ app.use('/api/v1/operations', operationsRoutes);
 app.use('/api/v1/assessments', assessmentRoutes);
 
 // ==========================================
-// SERVER INITIALIZATION
+// HEALTH CHECK — keep-warm ping endpoint
+// Called every 14 minutes by cron-job.org
+// Prevents Render backend from sleeping
+// ==========================================
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        service: 'SWPI Backend',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// ==========================================
+// ROOT
 // ==========================================
 app.get('/', (req, res) => {
     res.status(200).json({ message: "SWPI API is live and secure." });
 });
 
+// ==========================================
+// SERVER INITIALIZATION
+// ==========================================
 app.listen(PORT, () => {
     console.log(`SWPI Backend is securely running on port ${PORT}`);
 });
