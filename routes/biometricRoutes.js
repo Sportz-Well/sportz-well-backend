@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { authenticate } = require('../middleware/authMiddleware'); // FIXED: destructured import
+const { authenticate } = require('../middleware/authMiddleware');
 
 // Initialize the Google SDK
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -92,7 +92,8 @@ router.post('/analyze', authenticate, async (req, res) => {
 
         console.log(`Triggering SWPI Engine for Player ID ${player_id}...`);
 
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+        // FIXED: Updated from retired gemini-1.5-pro to gemini-2.5-flash
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         let aiReport = await fetchFromGeminiWithRetry(model, prompt);
 
         if (aiReport.startsWith('```json')) aiReport = aiReport.replace(/```json/g, '');
