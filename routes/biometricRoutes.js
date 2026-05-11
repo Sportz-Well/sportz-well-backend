@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const authenticate = require('../middleware/authMiddleware');
+const { authenticate } = require('../middleware/authMiddleware'); // FIXED: destructured import
 
 // Initialize the Google SDK
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
