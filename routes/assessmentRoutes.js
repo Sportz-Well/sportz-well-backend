@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const authenticate = require('../middleware/authMiddleware');
+const { authenticate } = require('../middleware/authMiddleware'); // FIXED: destructured import
 
 // -------------------------------------------------------
 // POST /api/v1/assessments
@@ -13,7 +13,6 @@ router.post('/', authenticate, async (req, res) => {
     try {
         console.log("📥 Assessment payload received:", JSON.stringify(req.body));
 
-        // Get academy_id securely from the verified token
         const secureAcademyId = req.user.academy_id;
 
         let assessments = [];
@@ -42,7 +41,6 @@ router.post('/', authenticate, async (req, res) => {
                 throw new Error(`Missing player_id in entry: ${JSON.stringify(item)}`);
             }
 
-            // Security check: confirm this player belongs to the coach's academy
             const playerCheck = await client.query(
                 `SELECT id FROM players WHERE id = $1 AND academy_id = $2`,
                 [player_id, secureAcademyId]
