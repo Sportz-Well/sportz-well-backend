@@ -9,7 +9,7 @@ const { authenticate } = require('../middleware/authMiddleware');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // ==========================================
-// ENTERPRISE RETRY LOGIC & PITCH FALLBACK
+// ENTERPRISE RETRY LOGIC & FALLBACK
 // ==========================================
 async function fetchFromGeminiWithRetry(model, prompt, retries = 3) {
     for (let i = 0; i < retries; i++) {
@@ -92,14 +92,21 @@ router.post('/analyze', authenticate, async (req, res) => {
 
         console.log(`Triggering SWPI Engine for Player ID ${player_id}...`);
 
-        // FIXED: Updated from retired gemini-1.5-pro to gemini-2.5-flash
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         let aiReport = await fetchFromGeminiWithRetry(model, prompt);
 
+        // Strip markdown fences if Gemini wraps the JSON in them
         if (aiReport.startsWith('```json')) aiReport = aiReport.replace(/```json/g, '');
         if (aiReport.startsWith('```')) aiReport = aiReport.replace(/```/g, '');
         aiReport = aiReport.trim();
 
+        /*
+            STORAGE NOTE:
+            aiReport is a JSON string. We save it as a plain TEXT string in the DB.
+            If your column type is JSONB, PostgreSQL will parse it into an object
+            on retrieval — which breaks the frontend parser.
+            We store it as a string and always stringify on the way out (see Route 2).
+        */
         const insertQuery = `
             INSERT INTO biomechanical_logs 
             (player_id, generated_by_user_id, assessment_date, ai_persona, kinematic_data_json, snapshot_base64, ai_generated_report, status)
@@ -148,11 +155,33 @@ router.get('/latest/:player_id', authenticate, async (req, res) => {
             return res.status(404).json({ success: false, error: "No reports found for this player." });
         }
 
+        /*
+            THE CORE FIX:
+            PostgreSQL JSONB columns automatically parse stored JSON into objects
+            when they are returned. The frontend's safeParseJSON() expects a STRING
+            to parse — if it receives an object, JSON.parse() crashes with
+            "Unexpected non-whitespace character" or "[object Object] is not valid JSON".
+
+            Solution: before sending to the frontend, we check each field.
+            If it is already an object (parsed by PostgreSQL), we re-stringify it
+            back into a string so the frontend always receives consistent string input.
+            This works regardless of whether the column is TEXT or JSONB.
+        */
+        const normalizedReports = logCheck.rows.map(row => ({
+            ...row,
+            ai_generated_report: typeof row.ai_generated_report === 'object'
+                ? JSON.stringify(row.ai_generated_report)
+                : row.ai_generated_report,
+            kinematic_data_json: typeof row.kinematic_data_json === 'object'
+                ? JSON.stringify(row.kinematic_data_json)
+                : row.kinematic_data_json
+        }));
+
         res.status(200).json({
             success: true,
             data: {
                 player: playerData,
-                reports: logCheck.rows
+                reports: normalizedReports
             }
         });
 
