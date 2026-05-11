@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { authenticate } = require('../middleware/authMiddleware'); // FIXED: destructured import + added auth
 
 // The Core Intellectual Property (IP) - The Expert Personas
 const PERSONA_PROMPTS = {
@@ -12,18 +13,24 @@ const PERSONA_PROMPTS = {
     gilchrist: `You are an elite cricket biomechanics expert analyzing a wicketkeeper, adopting the analytical mindset of Adam Gilchrist. Focus heavily on footwork, soft hands, posture, agility, and head position. Keep the tone professional, encouraging, and highly technical.`
 };
 
-router.post('/', async (req, res) => {
+// FIXED: authenticate added — stops unauthenticated Gemini API abuse
+router.post('/', authenticate, async (req, res) => {
     try {
-        const { player_id, video_link, raw_notes, persona, school_id } = req.body;
+        const { player_id, video_link, raw_notes, persona } = req.body;
 
-        // 1. Verify Player & Access
-        const playerRes = await pool.query('SELECT * FROM players WHERE id = $1 AND (academy_id = $2 OR school_id = $2)', [player_id, school_id]);
+        // FIXED: academy_id now comes from the verified JWT token, not the request body
+        const secureAcademyId = req.user.academy_id;
+
+        // Security check: confirm this player belongs to the coach's academy
+        const playerRes = await pool.query(
+            'SELECT * FROM players WHERE id = $1 AND academy_id = $2',
+            [player_id, secureAcademyId]
+        );
         if (playerRes.rows.length === 0) {
-            return res.status(404).json({ success: false, message: 'Player not found or access denied.' });
+            return res.status(403).json({ success: false, message: 'Access denied or player not found.' });
         }
         const player = playerRes.rows[0];
 
-        // 2. Prepare the AI Prompt
         const systemInstruction = PERSONA_PROMPTS[persona] || PERSONA_PROMPTS['sachin'];
         const prompt = `
         Analyze the following player based on the coach's raw observations.
@@ -67,7 +74,6 @@ router.post('/', async (req, res) => {
         }
         `;
 
-        // 3. Fire the API Call to Google Gemini using the existing correct package
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ 
             model: "gemini-2.5-flash",
@@ -76,13 +82,10 @@ router.post('/', async (req, res) => {
 
         const result = await model.generateContent(prompt);
         let textResponse = result.response.text();
-        
-        // Strip out any accidental markdown formatting the AI might add
         textResponse = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
 
         const reportData = JSON.parse(textResponse);
 
-        // Send the JSON report back to the frontend
         res.json({ success: true, report: reportData, player: player });
 
     } catch (err) {
