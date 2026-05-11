@@ -4,7 +4,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const authenticate = require('../middleware/authMiddleware');
+const { authenticate } = require('../middleware/authMiddleware'); // FIXED: destructured import
 
 // Apply shared authentication middleware to all routes in this file
 router.use(authenticate);
@@ -223,7 +223,6 @@ router.post('/generate-monthly-report', async (req, res) => {
     }
 
     try {
-        // STEP 1: Verify player belongs to this academy
         const playerRes = await db.query(
             `SELECT id, name, role FROM players WHERE id = $1 AND academy_id = $2`,
             [player_id, secureAcademyId]
@@ -233,7 +232,6 @@ router.post('/generate-monthly-report', async (req, res) => {
         }
         const player = playerRes.rows[0];
 
-        // STEP 2: Check if report already generated this month
         const existingReport = await db.query(
             `SELECT id FROM generated_reports WHERE player_id = $1 AND report_month = $2 AND report_year = $3 AND academy_id = $4`,
             [player_id, month, year, secureAcademyId]
@@ -244,7 +242,6 @@ router.post('/generate-monthly-report', async (req, res) => {
             });
         }
 
-        // STEP 3: Attendance for the month
         const attendanceRes = await db.query(
             `SELECT status FROM daily_attendance WHERE player_id = $1 AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3`,
             [player_id, month, year]
@@ -253,7 +250,6 @@ router.post('/generate-monthly-report', async (req, res) => {
         const presentCount = attendanceRes.rows.filter(r => r.status === 'Present').length;
         const attendancePct = totalSessions > 0 ? Math.round((presentCount / totalSessions) * 100) : 0;
 
-        // STEP 4: Weekly assessments for the month
         const assessmentRes = await db.query(
             `SELECT physical_score, technical_score, mental_score, match_score, assessment_date FROM weekly_assessments WHERE player_id = $1 AND EXTRACT(MONTH FROM assessment_date) = $2 AND EXTRACT(YEAR FROM assessment_date) = $3 ORDER BY assessment_date ASC`,
             [player_id, month, year]
@@ -278,7 +274,6 @@ router.post('/generate-monthly-report', async (req, res) => {
             ? ((Number(avgPhysical) + Number(avgTechnical) + Number(avgMental)) / 3).toFixed(1)
             : 0;
 
-        // STEP 5: Match data for the month
         const matchRes = await db.query(
             `SELECT runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, tournament_name FROM match_logs WHERE player_id = $1 AND EXTRACT(MONTH FROM match_date) = $2 AND EXTRACT(YEAR FROM match_date) = $3`,
             [player_id, month, year]
@@ -293,20 +288,17 @@ router.post('/generate-monthly-report', async (req, res) => {
         });
         const battingAvg = dismissals > 0 ? (totalRuns / dismissals).toFixed(1) : totalRuns > 0 ? `${totalRuns}*` : "0";
 
-        // STEP 6: Coach remarks for the month
         const remarksRes = await db.query(
             `SELECT notes, remark_date FROM coach_remarks WHERE player_id = $1 AND EXTRACT(MONTH FROM remark_date) = $2 AND EXTRACT(YEAR FROM remark_date) = $3 ORDER BY remark_date DESC`,
             [player_id, month, year]
         );
         const latestRemark = remarksRes.rows.length > 0 ? remarksRes.rows[0].notes : "No remarks recorded this month.";
 
-        // STEP 7: Record report as generated to block duplicates
         await db.query(
             `INSERT INTO generated_reports (player_id, academy_id, report_month, report_year, generated_at) VALUES ($1, $2, $3, $4, NOW())`,
             [player_id, secureAcademyId, month, year]
         );
 
-        // STEP 8: Return all data to frontend
         res.status(200).json({
             success: true,
             player: { id: player.id, name: player.name, role: player.role },
