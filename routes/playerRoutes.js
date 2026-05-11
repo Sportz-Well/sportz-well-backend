@@ -1,12 +1,12 @@
 'use strict';
-const express = require('express');
-const router = express.Router();
-const pool = require('../db');
+const express  = require('express');
+const router   = express.Router();
+const pool     = require('../db');
 const { authenticate, requireAdmin } = require('../middleware/authMiddleware');
 
 // --- GET ALL PLAYERS ---
-// Admin (academy_id = 0 OR role = admin) sees all players
-// Coach sees only their academy
+// admin role OR academy_id = 0 → sees all players across all academies
+// coach → sees only their own academy
 router.get('/', authenticate, async (req, res) => {
   try {
     const { academy_id, role } = req.user;
@@ -33,7 +33,8 @@ router.get('/', authenticate, async (req, res) => {
 router.post('/', authenticate, async (req, res) => {
   try {
     const academy_id = req.user.academy_id;
-    const { name, first_name, last_name, role, primary_role, date_of_birth, gender, std_div, school_id, mobile_no } = req.body;
+    const { name, first_name, last_name, role, primary_role,
+            date_of_birth, gender, std_div, school_id, mobile_no } = req.body;
 
     const finalName = name || (first_name ? `${first_name} ${last_name || ''}`.trim() : 'Unknown Athlete');
     const finalRole = role || primary_role || 'Cricket Player';
@@ -41,7 +42,9 @@ router.post('/', authenticate, async (req, res) => {
     const result = await pool.query(
       `INSERT INTO players (name, role, academy_id, date_of_birth, gender, std_div, school_id, mobile_no)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [finalName, finalRole, academy_id, date_of_birth || null, gender || null, std_div || null, school_id || null, mobile_no || null]
+      [finalName, finalRole, academy_id,
+       date_of_birth || null, gender || null,
+       std_div || null, school_id || null, mobile_no || null]
     );
 
     res.status(201).json({ success: true, message: "Player added.", data: result.rows[0] });
@@ -55,7 +58,8 @@ router.post('/', authenticate, async (req, res) => {
 router.post('/add', authenticate, async (req, res) => {
   try {
     const academy_id = req.user.academy_id;
-    const { name, role, primary_role, date_of_birth, gender, std_div, school_id, mobile_no } = req.body;
+    const { name, role, primary_role, date_of_birth,
+            gender, std_div, school_id, mobile_no } = req.body;
 
     const finalName = name || 'Unknown Athlete';
     const finalRole = role || primary_role || 'Cricket Player';
@@ -63,7 +67,9 @@ router.post('/add', authenticate, async (req, res) => {
     const result = await pool.query(
       `INSERT INTO players (name, role, academy_id, date_of_birth, gender, std_div, school_id, mobile_no)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [finalName, finalRole, academy_id, date_of_birth || null, gender || null, std_div || null, school_id || null, mobile_no || null]
+      [finalName, finalRole, academy_id,
+       date_of_birth || null, gender || null,
+       std_div || null, school_id || null, mobile_no || null]
     );
 
     res.status(201).json({ success: true, message: "Player added.", data: result.rows[0] });
@@ -76,8 +82,7 @@ router.post('/add', authenticate, async (req, res) => {
 // --- DELETE PLAYER (admin only) ---
 router.delete('/:id', authenticate, requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM players WHERE id = $1', [id]);
+    await pool.query('DELETE FROM players WHERE id = $1', [req.params.id]);
     res.status(200).json({ success: true, message: "Player deleted." });
   } catch (error) {
     console.error("DELETE Player Error:", error.message);
