@@ -4,9 +4,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { authenticate } = require('../middleware/authMiddleware'); // FIXED: destructured import
+const { authenticate } = require('../middleware/authMiddleware');
 
-// Apply shared authentication middleware to all routes in this file
 router.use(authenticate);
 
 // ==========================================================
@@ -16,7 +15,6 @@ router.use(authenticate);
 router.post('/attendance', async (req, res) => {
     const { date, attendance_data } = req.body;
     const secureAcademyId = req.user.academy_id;
-
     if (!date || !attendance_data || attendance_data.length === 0) {
         return res.status(400).json({ error: "Missing data." });
     }
@@ -39,7 +37,6 @@ router.post('/attendance', async (req, res) => {
 router.post('/weekly-assessment', async (req, res) => {
     const { player_id, assessment_date, physical_score, technical_score, mental_score } = req.body;
     const secureAcademyId = req.user.academy_id;
-
     if (!player_id || !assessment_date) {
         return res.status(400).json({ error: "Missing data." });
     }
@@ -57,7 +54,6 @@ router.post('/weekly-assessment', async (req, res) => {
 router.post('/match-log', async (req, res) => {
     const { player_id, match_date, tournament_name, runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, catches, stumpings, run_outs } = req.body;
     const secureAcademyId = req.user.academy_id;
-
     if (!player_id || !match_date) {
         return res.status(400).json({ error: "Missing match data." });
     }
@@ -75,7 +71,6 @@ router.post('/match-log', async (req, res) => {
 router.post('/coach-remarks', async (req, res) => {
     const { player_id, remark_date, notes } = req.body;
     const secureAcademyId = req.user.academy_id;
-
     if (!player_id || !remark_date || !notes) {
         return res.status(400).json({ error: "Missing remark data." });
     }
@@ -93,7 +88,6 @@ router.post('/coach-remarks', async (req, res) => {
 router.post('/video-log', async (req, res) => {
     const { player_id, upload_date, video_url, technical_notes } = req.body;
     const secureAcademyId = req.user.academy_id;
-
     if (!player_id || !upload_date || !video_url) {
         return res.status(400).json({ error: "Missing required video data." });
     }
@@ -110,7 +104,7 @@ router.post('/video-log', async (req, res) => {
 });
 
 // ==========================================================
-// AI REPORT GENERATION (Legacy - kept for reference)
+// AI REPORT GENERATION (Legacy)
 // ==========================================================
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
@@ -118,7 +112,6 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 router.post('/generate-ai-report', async (req, res) => {
     const { player_id } = req.body;
     const secureAcademyId = req.user.academy_id;
-
     if (!player_id) return res.status(400).json({ error: "Missing player_id" });
 
     try {
@@ -143,8 +136,7 @@ router.post('/generate-ai-report', async (req, res) => {
         );
         const coachNotes = remarksRes.rows.map(r => r.notes).join(' | ');
 
-        let totalRuns = 0; let dismissals = 0; let totalRunsConceded = 0; let totalOvers = 0; let totalWickets = 0;
-
+        let totalRuns = 0, dismissals = 0, totalRunsConceded = 0, totalOvers = 0, totalWickets = 0;
         matches.forEach(m => {
             totalRuns += Number(m.runs || 0);
             if (!m.not_out) dismissals += 1;
@@ -170,12 +162,7 @@ router.post('/generate-ai-report', async (req, res) => {
         Do not use markdown. Plain text with line breaks only.
         `;
 
-        let attempt = 0;
-        const maxAttempts = 3;
-        let aiReportText = "";
-        let aiSuccess = false;
-        let lastError = null;
-
+        let attempt = 0, maxAttempts = 3, aiReportText = "", aiSuccess = false, lastError = null;
         while (attempt < maxAttempts && !aiSuccess) {
             try {
                 const currentModelName = (attempt === maxAttempts - 1) ? "gemini-2.5-flash-lite" : "gemini-2.5-flash";
@@ -188,13 +175,9 @@ router.post('/generate-ai-report', async (req, res) => {
             } catch (err) {
                 lastError = err;
                 attempt++;
-                if (attempt < maxAttempts) {
-                    const waitTime = Math.pow(2, attempt) * 1000;
-                    await delay(waitTime);
-                }
+                if (attempt < maxAttempts) await delay(Math.pow(2, attempt) * 1000);
             }
         }
-
         if (!aiSuccess) throw lastError;
 
         res.status(200).json({
@@ -203,7 +186,6 @@ router.post('/generate-ai-report', async (req, res) => {
             calculated_stats: { batAvg, ecoRate, totalWickets, matches_played: matches.length },
             ai_report: aiReportText
         });
-
     } catch (err) {
         console.error("AI Gen Error:", err);
         res.status(500).json({ error: "AI Error: " + err.message });
@@ -211,7 +193,7 @@ router.post('/generate-ai-report', async (req, res) => {
 });
 
 // ==========================================================
-// MONTHLY REPORT GENERATION (All 4 Sources — No AI)
+// MONTHLY REPORT GENERATION
 // ==========================================================
 
 router.post('/generate-monthly-report', async (req, res) => {
@@ -223,6 +205,7 @@ router.post('/generate-monthly-report', async (req, res) => {
     }
 
     try {
+        // Verify player belongs to this academy
         const playerRes = await db.query(
             `SELECT id, name, role FROM players WHERE id = $1 AND academy_id = $2`,
             [player_id, secureAcademyId]
@@ -232,6 +215,7 @@ router.post('/generate-monthly-report', async (req, res) => {
         }
         const player = playerRes.rows[0];
 
+        // Check if report already exists for this player+month+year
         const existingReport = await db.query(
             `SELECT id FROM generated_reports WHERE player_id = $1 AND report_month = $2 AND report_year = $3 AND academy_id = $4`,
             [player_id, month, year, secureAcademyId]
@@ -242,16 +226,26 @@ router.post('/generate-monthly-report', async (req, res) => {
             });
         }
 
+        // --- ATTENDANCE ---
         const attendanceRes = await db.query(
-            `SELECT status FROM daily_attendance WHERE player_id = $1 AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3`,
+            `SELECT status FROM daily_attendance
+             WHERE player_id = $1
+             AND EXTRACT(MONTH FROM date) = $2
+             AND EXTRACT(YEAR FROM date) = $3`,
             [player_id, month, year]
         );
         const totalSessions = attendanceRes.rows.length;
         const presentCount = attendanceRes.rows.filter(r => r.status === 'Present').length;
         const attendancePct = totalSessions > 0 ? Math.round((presentCount / totalSessions) * 100) : 0;
 
+        // --- PLAYER ASSESSMENTS ---
         const assessmentRes = await db.query(
-            `SELECT physical_score, technical_score, mental_score, match_score, assessment_date FROM weekly_assessments WHERE player_id = $1 AND EXTRACT(MONTH FROM assessment_date) = $2 AND EXTRACT(YEAR FROM assessment_date) = $3 ORDER BY assessment_date ASC`,
+            `SELECT physical_score, technical_score, mental_score, assessment_date
+             FROM weekly_assessments
+             WHERE player_id = $1
+             AND EXTRACT(MONTH FROM assessment_date) = $2
+             AND EXTRACT(YEAR FROM assessment_date) = $3
+             ORDER BY assessment_date ASC`,
             [player_id, month, year]
         );
         const assessments = assessmentRes.rows;
@@ -274,8 +268,35 @@ router.post('/generate-monthly-report', async (req, res) => {
             ? ((Number(avgPhysical) + Number(avgTechnical) + Number(avgMental)) / 3).toFixed(1)
             : 0;
 
+        // --- SQUAD AVERAGE ---
+        // Gets the average scores for ALL players in this academy this month.
+        // Used to show a comparison line on the radar chart in the parent report.
+        // Uses school_id because that is the column name in weekly_assessments.
+        const squadRes = await db.query(
+            `SELECT
+                ROUND(AVG(physical_score)::numeric, 1)  AS squad_physical,
+                ROUND(AVG(technical_score)::numeric, 1) AS squad_technical,
+                ROUND(AVG(mental_score)::numeric, 1)    AS squad_mental
+             FROM weekly_assessments
+             WHERE school_id = $1
+             AND EXTRACT(MONTH FROM assessment_date) = $2
+             AND EXTRACT(YEAR FROM assessment_date) = $3`,
+            [secureAcademyId, month, year]
+        );
+        const squadRow = squadRes.rows[0];
+        const squadAvg = {
+            physical:  Number(squadRow.squad_physical  || 5),
+            technical: Number(squadRow.squad_technical || 5),
+            mental:    Number(squadRow.squad_mental    || 5)
+        };
+
+        // --- MATCHES ---
         const matchRes = await db.query(
-            `SELECT runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, tournament_name FROM match_logs WHERE player_id = $1 AND EXTRACT(MONTH FROM match_date) = $2 AND EXTRACT(YEAR FROM match_date) = $3`,
+            `SELECT runs, balls_faced, fours, sixes, not_out, overs_bowled, wickets, runs_conceded, tournament_name
+             FROM match_logs
+             WHERE player_id = $1
+             AND EXTRACT(MONTH FROM match_date) = $2
+             AND EXTRACT(YEAR FROM match_date) = $3`,
             [player_id, month, year]
         );
         const matches = matchRes.rows;
@@ -288,33 +309,53 @@ router.post('/generate-monthly-report', async (req, res) => {
         });
         const battingAvg = dismissals > 0 ? (totalRuns / dismissals).toFixed(1) : totalRuns > 0 ? `${totalRuns}*` : "0";
 
+        // --- COACH REMARKS ---
         const remarksRes = await db.query(
-            `SELECT notes, remark_date FROM coach_remarks WHERE player_id = $1 AND EXTRACT(MONTH FROM remark_date) = $2 AND EXTRACT(YEAR FROM remark_date) = $3 ORDER BY remark_date DESC`,
+            `SELECT notes, remark_date FROM coach_remarks
+             WHERE player_id = $1
+             AND EXTRACT(MONTH FROM remark_date) = $2
+             AND EXTRACT(YEAR FROM remark_date) = $3
+             ORDER BY remark_date DESC`,
             [player_id, month, year]
         );
-        const latestRemark = remarksRes.rows.length > 0 ? remarksRes.rows[0].notes : "No remarks recorded this month.";
+        const latestRemark = remarksRes.rows.length > 0
+            ? remarksRes.rows[0].notes
+            : "No remarks recorded this month.";
 
+        // --- SAVE RECORD ---
         await db.query(
             `INSERT INTO generated_reports (player_id, academy_id, report_month, report_year, generated_at) VALUES ($1, $2, $3, $4, NOW())`,
             [player_id, secureAcademyId, month, year]
         );
 
+        // --- RESPOND ---
         res.status(200).json({
             success: true,
             player: { id: player.id, name: player.name, role: player.role },
             report_period: { month, year },
-            attendance: { percentage: attendancePct, present: presentCount, total: totalSessions },
+            attendance: {
+                percentage: attendancePct,
+                present: presentCount,
+                total: totalSessions
+            },
             assessments: {
                 overall_score: overallScore,
-                avg_physical: avgPhysical,
+                avg_physical:  avgPhysical,
                 avg_technical: avgTechnical,
-                avg_mental: avgMental,
-                weekly_trend: weeklyScores
+                avg_mental:    avgMental,
+                weekly_trend:  weeklyScores
             },
+            /*
+                squad_avg: average scores for all players in the academy this month.
+                The frontend uses this to draw a second "Squad Average" line
+                on the radar chart so parents can see how their child compares.
+                Falls back to 5.0 across all attributes if no squad data exists.
+            */
+            squad_avg: squadAvg,
             matches: {
-                total_runs: totalRuns,
+                total_runs:    totalRuns,
                 highest_score: highestScore,
-                batting_avg: battingAvg,
+                batting_avg:   battingAvg,
                 total_wickets: totalWickets,
                 matches_played: matches.length
             },
