@@ -1,76 +1,66 @@
 'use strict';
-const express = require('express');
-const router = express.Router();
-const pool = require('../db');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const express  = require('express');
+const router   = express.Router();
+const pool     = require('../db');
+const bcrypt   = require('bcrypt');
+const jwt      = require('jsonwebtoken');
+
+const SECRET = process.env.JWT_SECRET || 'swpi-production-secret-2026';
 
 router.post('/login', async (req, res) => {
-    try {
-        const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-        // 1. HARDCODED DEMO BYPASS (Failsafe for Pitch)
-        if ((email === 'coach@sportzwell.com' || email === 'admin@sportzwell.com') && password === 'demo123') {
-            const role = email.includes('admin') ? 'admin' : 'head_coach';
-            
-            // Admin gets global access (0), Coach defaults to Singhania (1)
-            const academy_id = role === 'admin' ? 0 : 1; 
-
-            // Sign a token valid for 24 hours
-            const token = jwt.sign(
-                { email, role, academy_id }, 
-                process.env.JWT_SECRET || 'swpi-production-secret-2026', 
-                { expiresIn: '24h' }
-            );
-            
-            console.log(`✅ Demo Bypass Used: ${email} logged in as ${role}.`);
-            
-            return res.json({
-                success: true,
-                token,
-                user: { email, role, academy_id }
-            });
-        }
-
-        // 2. STANDARD DB CHECK (For real users)
-        const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-        if (result.rows.length === 0) {
-            return res.status(401).json({ success: false, message: 'Invalid credentials' });
-        }
-
-        const user = result.rows[0];
-
-        // 3. SMART PASSWORD CHECK (Handles both bcrypt and plain text gracefully)
-        let isMatch = false;
-        const dbPassword = user.password_hash || user.password;
-        
-        if (dbPassword && (dbPassword.startsWith('$2b$') || dbPassword.startsWith('$2a$'))) {
-            isMatch = await bcrypt.compare(password, dbPassword);
-        } else {
-            isMatch = (password === dbPassword);
-        }
-
-        if (!isMatch) {
-            return res.status(401).json({ success: false, message: 'Invalid credentials' });
-        }
-
-        // 4. SUCCESS
-        const token = jwt.sign(
-            { id: user.id, email: user.email, role: user.role, academy_id: user.academy_id },
-            process.env.JWT_SECRET || 'swpi-production-secret-2026',
-            { expiresIn: '24h' }
-        );
-
-        res.json({
-            success: true,
-            token,
-            user: { id: user.id, email: user.email, role: user.role, academy_id: user.academy_id }
-        });
-
-    } catch (err) {
-        console.error('Login error:', err);
-        res.status(500).json({ success: false, message: 'Server error' });
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: 'Email and password required' });
     }
+
+    // Single DB lookup — no bypass, no hardcoding
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    const user = result.rows[0];
+
+    // Support both bcrypt hashed and plain text passwords
+    const dbPassword = user.password_hash || user.password;
+    let isMatch = false;
+
+    if (dbPassword && (dbPassword.startsWith('$2b$') || dbPassword.startsWith('$2a$'))) {
+      isMatch = await bcrypt.compare(password, dbPassword);
+    } else {
+      isMatch = (password === dbPassword);
+    }
+
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign(
+      {
+        id:         user.id,
+        email:      user.email,
+        role:       user.role,
+        academy_id: user.academy_id
+      },
+      SECRET,
+      { expiresIn: '24h' }
+    );
+
+    console.log(`Login: ${user.email} | role: ${user.role} | academy_id: ${user.academy_id}`);
+
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, email: user.email, role: user.role, academy_id: user.academy_id }
+    });
+
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
 });
 
 module.exports = router;
