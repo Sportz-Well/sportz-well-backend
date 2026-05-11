@@ -4,32 +4,32 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const AnalyticsService = require('../analyticsService');
+const { authenticate } = require('../middleware/authMiddleware'); // FIXED: destructured import
 
 const analyticsService = new AnalyticsService(db);
 
-// 🔥 TEST ROUTE
-router.get('/test', (req, res) => {
-  res.json({
-    message: 'NEW CODE DEPLOYED SUCCESSFULLY'
-  });
+// ==========================================================
+// ALL ROUTES PROTECTED — authenticate runs on every call
+// ==========================================================
+
+// TEST ROUTE (Protected — internal use only)
+router.get('/test', authenticate, (req, res) => {
+  res.json({ message: 'NEW CODE DEPLOYED SUCCESSFULLY' });
 });
 
-// 🔥 DASHBOARD (Explicitly filtered by school_id=1)
-router.get('/dashboard', async (req, res) => {
+// DASHBOARD — filtered by the logged-in coach's academy
+router.get('/dashboard', authenticate, async (req, res) => {
   try {
-    const schoolId = 1; // Default for demo context
+    // FIXED: Use the academy from the verified JWT token, not a hardcoded value
+    const secureAcademyId = req.user.academy_id;
 
-    // 1. Get Analytics (Avg Score)
-    const stats = await analyticsService.getDashboardAnalytics(schoolId);
-    
-    // 2. Count Total Players
+    const stats = await analyticsService.getDashboardAnalytics(secureAcademyId);
+
     const playersRes = await db.query(
-      'SELECT COUNT(*) as count FROM players WHERE school_id = $1', 
-      [schoolId]
+      'SELECT COUNT(*) as count FROM players WHERE academy_id = $1',
+      [secureAcademyId]
     );
 
-    // 3. Count At Risk Players (Latest assessment per player)
-    // Counts distinct user_ids where the MOST RECENT test_date record has 'At Risk' status
     const atRiskRes = await db.query(`
       SELECT COUNT(*) as count 
       FROM (
@@ -39,7 +39,7 @@ router.get('/dashboard', async (req, res) => {
         ORDER BY user_id, test_date DESC
       ) AS latest_assessments
       WHERE risk_status = 'At Risk'
-    `, [schoolId]);
+    `, [secureAcademyId]);
 
     res.json({
       success: true,
@@ -50,67 +50,67 @@ router.get('/dashboard', async (req, res) => {
 
   } catch (error) {
     console.error('[dashboard] Error fetching dashboard data:', error.message);
-    // Return safe defaults to prevent frontend crash
-    res.json({
-      success: true,
-      total_players: 0,
-      avg_score: 0,
-      at_risk: 0
-    });
+    res.json({ success: true, total_players: 0, avg_score: 0, at_risk: 0 });
   }
 });
 
-// 🔥 TREND (Explicitly filtered by school_id=1)
-router.get('/trend', async (req, res) => {
+// TREND — filtered by the logged-in coach's academy
+router.get('/trend', authenticate, async (req, res) => {
   try {
-    const schoolId = 1; // Default for demo context
-    const trendData = await analyticsService.getSchoolTrend(schoolId);
+    const secureAcademyId = req.user.academy_id;
+    const trendData = await analyticsService.getSchoolTrend(secureAcademyId);
 
-    // Ensure we always return an array (even if empty) to prevent frontend map() crash
     if (!trendData || !Array.isArray(trendData)) {
-      return res.json({
-        success: true,
-        data: []
-      });
+      return res.json({ success: true, data: [] });
     }
 
     res.json({
       success: true,
       data: trendData.map(row => ({
-        label: row.test_date ? new Date(row.test_date).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }) : 'N/A',
+        label: row.test_date
+          ? new Date(row.test_date).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' })
+          : 'N/A',
         avg_score: Math.round(row.avg_score || 0)
       }))
     });
 
   } catch (error) {
     console.error('[trend] Error fetching trend data:', error.message);
-    // CRITICAL: Return empty array to prevent data.map crash on frontend
-    res.json({
-      success: true,
-      data: []
-    });
+    res.json({ success: true, data: [] });
   }
 });
 
-// 🔥 PLAYER TREND (Individual)
-router.get('/players/:id/trend', async (req, res) => {
+// PLAYER TREND — verify player belongs to the coach's academy before returning data
+router.get('/players/:id/trend', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
+    const secureAcademyId = req.user.academy_id;
+
+    // Security check: confirm this player belongs to the logged-in coach's academy
+    const playerCheck = await db.query(
+      'SELECT id FROM players WHERE id = $1 AND academy_id = $2',
+      [id, secureAcademyId]
+    );
+
+    if (playerCheck.rows.length === 0) {
+      return res.status(403).json({ success: false, error: 'Access denied or player not found.' });
+    }
+
     const trendData = await analyticsService.getPlayerTrend(id);
 
     res.json({
       success: true,
       data: trendData.map(row => ({
-        label: row.quarterly_cycle || (row.test_date ? new Date(row.test_date).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }) : 'N/A'),
+        label: row.quarterly_cycle || (row.test_date
+          ? new Date(row.test_date).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' })
+          : 'N/A'),
         avg_score: Math.round(row.score || 0)
       }))
     });
+
   } catch (error) {
     console.error(`[player-trend] Error for player ${req.params.id}:`, error.message);
-    res.json({
-      success: true,
-      data: []
-    });
+    res.json({ success: true, data: [] });
   }
 });
 
