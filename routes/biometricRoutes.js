@@ -1,35 +1,26 @@
 // =============================================================
 // biometricRoutes.js
-// LOCATION: routes/biometricRoutes.js (same place as before)
+// LOCATION: routes/biometricRoutes.js
 // =============================================================
 //
 // COMMIT MESSAGE:
-// fix: biometricRoutes.js — correct auth middleware path to
-// ../middleware/authMiddleware, integrate geminiService fallback,
-// bulletproof JSON save and parse
+// fix: biometricRoutes.js — change full_name to name to match
+// players table column, fixes 500 Internal Server Error on analyze
 //
-// WHAT CHANGED FROM PREVIOUS VERSION:
-// 1. Fixed: require('../middleware/auth') 
-//    → require('../middleware/authMiddleware')  ← CORRECT PATH
-// 2. Fixed: require('../geminiService') 
-//    → require('../geminiService')  ← at root level
-// 3. All Gemini calls use fallback chain (never fails silently)
-// 4. JSON always safely stringified before saving to DB
-// 5. GET route handles corrupted records gracefully
 // =============================================================
 
 const express  = require("express");
 const router   = express.Router();
-const pool     = require("../config/db");                        // your db file is in config/
-const { authenticate } = require("../middleware/authMiddleware"); // CORRECT PATH
-const { callGeminiWithFallback } = require("../geminiService");  // root level
+const pool     = require("../config/db");
+const { authenticate } = require("../middleware/authMiddleware");
+const { callGeminiWithFallback } = require("../geminiService");
 
 // ---------------------------------------------------------------
-// HELPER: Safely parse any value as JSON without crashing
+// HELPER: Safely parse JSON without crashing
 // ---------------------------------------------------------------
 function safeParseJSON(value, recordId) {
   if (value === null || value === undefined) return null;
-  if (typeof value === "object") return value; // PostgreSQL already parsed JSONB
+  if (typeof value === "object") return value;
   if (typeof value === "string") {
     try {
       return JSON.parse(value);
@@ -108,8 +99,7 @@ Required JSON structure:
 }
 
 // ---------------------------------------------------------------
-// POST /api/biometric/analyze
-// Called when coach clicks Generate Report on capture page
+// POST /api/v1/biometrics/analyze
 // ---------------------------------------------------------------
 router.post("/analyze", authenticate, async (req, res) => {
   const { player_id, coach_observations, persona, snapshot_base64 } = req.body;
@@ -120,9 +110,9 @@ router.post("/analyze", authenticate, async (req, res) => {
   }
 
   try {
-    // Fetch player from DB — enforces academy isolation
+    // FIX: column is 'name' not 'full_name'
     const playerResult = await pool.query(
-      "SELECT full_name, role FROM players WHERE id = $1 AND academy_id = $2",
+      "SELECT name, role FROM players WHERE id = $1 AND academy_id = $2",
       [player_id, academy_id]
     );
 
@@ -131,14 +121,13 @@ router.post("/analyze", authenticate, async (req, res) => {
     }
 
     const player = playerResult.rows[0];
-    console.log(`[BiometricRoutes] Starting analysis for ${player.full_name} (ID: ${player_id})`);
+    console.log(`[BiometricRoutes] Starting analysis for ${player.name} (ID: ${player_id})`);
 
-    // Call Gemini with automatic fallback
-    const prompt = buildBiomechanicalPrompt(player.full_name, player.role, coach_observations, persona);
+    const prompt = buildBiomechanicalPrompt(player.name, player.role, coach_observations, persona);
     const geminiResult = await callGeminiWithFallback(prompt);
     console.log(`[BiometricRoutes] AI response received. Model: ${geminiResult.modelUsed}`);
 
-    // Parse AI response — strip accidental markdown fences
+    // Parse and clean AI response
     let analysisData;
     let cleanText = geminiResult.text.trim();
     if (cleanText.startsWith("```")) {
@@ -164,12 +153,11 @@ router.post("/analyze", authenticate, async (req, res) => {
       };
     }
 
-    // Add metadata
-    analysisData.model_used    = geminiResult.modelUsed;
-    analysisData.generated_at  = new Date().toISOString();
-    analysisData.persona_used  = persona;
+    analysisData.model_used   = geminiResult.modelUsed;
+    analysisData.generated_at = new Date().toISOString();
+    analysisData.persona_used = persona;
 
-    // Save to DB — explicit JSON.stringify prevents double-stringify bug
+    // Save — explicit JSON.stringify prevents double-stringify bug
     const insertResult = await pool.query(
       `INSERT INTO biomechanical_logs
         (player_id, academy_id, analysis_data, snapshot_base64, coach_observations, persona, created_at)
@@ -197,8 +185,7 @@ router.post("/analyze", authenticate, async (req, res) => {
 });
 
 // ---------------------------------------------------------------
-// GET /api/biometric/report/:player_id
-// Called by report-view.html to load latest report
+// GET /api/v1/biometrics/report/:player_id
 // ---------------------------------------------------------------
 router.get("/report/:player_id", authenticate, async (req, res) => {
   const { player_id } = req.params;
@@ -218,12 +205,18 @@ router.get("/report/:player_id", authenticate, async (req, res) => {
       return res.status(404).json({ error: "No reports found for this player", player_id });
     }
 
-    // Find first valid, non-corrupted record
+    // Find first valid non-corrupted record
     let validRecord = null;
     for (const row of result.rows) {
       const parsed = safeParseJSON(row.analysis_data, row.id);
       if (parsed && !parsed._parse_error && parsed.overall_score !== undefined) {
-        validRecord = { id: row.id, analysis_data: parsed, coach_observations: row.coach_observations, persona: row.persona, created_at: row.created_at };
+        validRecord = {
+          id: row.id,
+          analysis_data: parsed,
+          coach_observations: row.coach_observations,
+          persona: row.persona,
+          created_at: row.created_at
+        };
         break;
       }
       console.warn(`[BiometricRoutes] Skipping corrupted record ID ${row.id}`);
@@ -237,19 +230,20 @@ router.get("/report/:player_id", authenticate, async (req, res) => {
       });
     }
 
+    // FIX: column is 'name' not 'full_name'
     const playerResult = await pool.query(
-      "SELECT full_name, role FROM players WHERE id = $1",
+      "SELECT name, role FROM players WHERE id = $1",
       [player_id]
     );
 
     return res.status(200).json({
       success: true,
-      player_name: playerResult.rows[0]?.full_name || "Player",
-      player_role:  playerResult.rows[0]?.role     || "Cricketer",
-      record_id:    validRecord.id,
-      created_at:   validRecord.created_at,
-      persona:      validRecord.persona,
-      analysis:     validRecord.analysis_data
+      player_name: playerResult.rows[0]?.name || "Player",
+      player_role: playerResult.rows[0]?.role  || "Cricketer",
+      record_id:   validRecord.id,
+      created_at:  validRecord.created_at,
+      persona:     validRecord.persona,
+      analysis:    validRecord.analysis_data
     });
 
   } catch (err) {
@@ -259,7 +253,7 @@ router.get("/report/:player_id", authenticate, async (req, res) => {
 });
 
 // ---------------------------------------------------------------
-// GET /api/biometric/history/:player_id
+// GET /api/v1/biometrics/history/:player_id
 // ---------------------------------------------------------------
 router.get("/history/:player_id", authenticate, async (req, res) => {
   const { player_id } = req.params;
