@@ -1,11 +1,11 @@
 // =============================================================
-// geminiService.js — SWPI Gemini Fallback Chain
+// geminiService.js
 // LOCATION: root of CRICKET-MVP-BACKEND (same level as server.js)
 // =============================================================
 //
 // COMMIT MESSAGE:
-// fix: geminiService.js — update Gemini model names to correct
-// working API versions, fixes 404 model not found errors
+// fix: geminiService.js — use gemini-2.5-flash and gemini-2.0-flash,
+// confirmed working models from API key, fixes 404 model errors
 //
 // =============================================================
 
@@ -13,9 +13,9 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// FIXED model names — these are the correct working API identifiers
-const MODEL_PRIMARY   = "gemini-1.5-pro";    // Best quality, stable
-const MODEL_SECONDARY = "gemini-1.5-flash";   // Fast fallback
+// CONFIRMED working models from your API key (verified May 2026)
+const MODEL_PRIMARY   = "gemini-2.5-flash";   // Best quality — stable June 2025
+const MODEL_SECONDARY = "gemini-2.0-flash";   // Fast reliable fallback
 
 const MAX_RETRIES   = 3;
 const BASE_DELAY_MS = 1500;
@@ -54,7 +54,6 @@ async function callModelWithRetry(modelName, prompt, maxRetries) {
         console.warn(`[GeminiService] ${modelName} busy. Waiting ${waitMs}ms...`);
         await sleep(waitMs);
       } else {
-        // Non-retryable error — throw immediately
         console.error(`[GeminiService] Non-retryable error on ${modelName}: ${err.message}`);
         throw err;
       }
@@ -90,7 +89,7 @@ function buildSafeDefaultReport() {
 }
 
 async function callGeminiWithFallback(prompt) {
-  // Step 1: Try primary model
+  // Step 1: Try primary model — gemini-2.5-flash
   try {
     const text = await callModelWithRetry(MODEL_PRIMARY, prompt, MAX_RETRIES);
     return { text, modelUsed: MODEL_PRIMARY, usedFallback: false };
@@ -98,7 +97,7 @@ async function callGeminiWithFallback(prompt) {
     console.warn(`[GeminiService] Primary model failed. Switching to fallback...`);
   }
 
-  // Step 2: Try secondary model
+  // Step 2: Try fallback — gemini-2.0-flash
   try {
     const text = await callModelWithRetry(MODEL_SECONDARY, prompt, MAX_RETRIES);
     return { text, modelUsed: MODEL_SECONDARY, usedFallback: true };
