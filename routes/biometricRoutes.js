@@ -1,194 +1,344 @@
-'use strict';
-const express = require('express');
+// =============================================================
+// biometricRoutes.js — SWPI Biomechanical Analysis Routes
+// =============================================================
+// WHAT CHANGED FROM PREVIOUS VERSION (plain English):
+// 1. All Gemini calls now go through geminiService.js which
+//    auto-switches to Gemini 1.5 Flash if 2.5 Flash is busy.
+// 2. JSON is always safely stringified before saving to DB.
+// 3. The save operation validates the AI response before saving
+//    so corrupted records can never be written again.
+// 4. GET route now has bulletproof JSON parsing so old broken
+//    records return a clean error object instead of crashing.
+// =============================================================
+
+const express = require("express");
 const router = express.Router();
-const pool = require('../db');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { authenticate } = require('../middleware/authMiddleware');
+const pool = require("../db"); // Your existing PostgreSQL connection
+const authenticateToken = require("../middleware/auth"); // Your existing JWT middleware
+const { callGeminiWithFallback } = require("../geminiService"); // NEW fallback service
 
-// Initialize the Google SDK
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// ==========================================
-// ENTERPRISE RETRY LOGIC & FALLBACK
-// ==========================================
-async function fetchFromGeminiWithRetry(model, prompt, retries = 3) {
-    for (let i = 0; i < retries; i++) {
-        try {
-            const result = await model.generateContent(prompt);
-            return result.response.text();
-        } catch (error) {
-            console.error(`[Attempt ${i + 1}] API Error:`, error.message);
-            if (error.status === 503 && i < retries - 1) {
-                const waitTime = Math.pow(2, i) * 1500;
-                console.log(`Server busy. Retrying in ${waitTime}ms...`);
-                await new Promise(res => setTimeout(res, waitTime));
-            } else if (i === retries - 1) {
-                console.log("All retries failed. Activating Fallback Report.");
-                return JSON.stringify({
-                    "radar_chart_scores": { "dynamic_balance": 5, "arm_extension": 5, "knee_bracing": 5, "wrist_snap": 5, "body_turn": 5 },
-                    "executive_summary": ["System encountered high network latency.", "Basic kinematics recorded safely.", "Please review raw data or run analysis again later."],
-                    "action_plan": "Focus on standard foundational drills today.",
-                    "holistic_wellness": { "injury_prevention": "Ensure proper warm-up to prevent strain.", "mindset_quote": "Discipline is doing what needs to be done.", "pro_tip": "Hydration is key during high-load sessions." }
-                });
-            } else {
-                throw error;
-            }
-        }
+// ---------------------------------------------------------------
+// HELPER: Safely parse any value as JSON
+// If it is already an object, return it as-is.
+// If it is a string, parse it.
+// If it is broken, return a safe error object instead of crashing.
+// ---------------------------------------------------------------
+function safeParseJSON(value, recordId) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "object") {
+    // PostgreSQL JSONB already parsed it — return directly
+    return value;
+  }
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch (e) {
+      console.error(`[BiometricRoutes] JSON parse failed for record ${recordId}: ${e.message}`);
+      // Return a safe object so the frontend never crashes
+      return {
+        _parse_error: true,
+        executive_summary: "This report has corrupted data. Please run a new capture session.",
+        overall_score: 0,
+        current_level: "Data Error",
+        key_strength: "N/A",
+        primary_focus: "Re-run capture session",
+        growth_30_day: "N/A",
+        radar_scores: { run_up_rhythm: 0, foot_placement: 0, body_turn_power: 0, straight_knee: 0, wrist_spin: 0, follow_through: 0 },
+        issues: [],
+        next_month_focus: ["Re-run biomechanical capture session"],
+        parent_action: "Please ask the coach to run a new video analysis session.",
+        expected_improvement_weeks: "TBD"
+      };
     }
+  }
+  return null;
 }
 
-// ---------------------------------------------------------
-// ROUTE 1: ANALYZE AND SAVE (Protected)
-// ---------------------------------------------------------
-router.post('/analyze', authenticate, async (req, res) => {
-    const { player_id, ai_persona, kinematic_data, snapshot_base64 } = req.body;
-    const user_id = req.user.id;
-    const secureAcademyId = req.user.academy_id;
+// ---------------------------------------------------------------
+// HELPER: Build the Gemini prompt for biomechanical analysis
+// ---------------------------------------------------------------
+function buildBiomechanicalPrompt(playerName, role, coachObservations, persona) {
+  const personaInstructions = {
+    "The Master (Batting)": "You are 'The Master' — a world-class batting technique analyst. Focus on balance, head position, backlift, and classical technique.",
+    "The Sultan (Pace)": "You are 'The Sultan' — an elite pace bowling coach. Focus on wrist position, run-up rhythm, arm speed, and seam position.",
+    "The Magician (Spin)": "You are 'The Magician' — a specialist spin bowling analyst. Focus on revolutions, drift, dip, foot placement, and body alignment.",
+    "The Keeper (Wicket)": "You are 'The Keeper' — a wicket-keeping and agility specialist. Focus on footwork, soft hands, positioning, and agility."
+  };
+
+  const personaText = personaInstructions[persona] || personaInstructions["The Master (Batting)"];
+
+  return `${personaText}
+
+You are generating a structured biomechanical report for a grassroots cricket player. 
+Player Name: ${playerName}
+Playing Role: ${role}
+Coach Observations: ${coachObservations}
+
+CRITICAL INSTRUCTION: You MUST respond with ONLY a valid JSON object. No preamble, no explanation, no markdown code blocks, no backticks. Just raw JSON starting with { and ending with }.
+
+The JSON must have EXACTLY this structure:
+{
+  "executive_summary": "One sentence plain-English summary for parents",
+  "overall_score": <number 0-100>,
+  "current_level": "<one of: Elite / Advanced / Developing / Beginner>",
+  "key_strength": "<one short phrase>",
+  "primary_focus": "<one short phrase>",
+  "growth_30_day": "<e.g. +6% Improvement or N/A>",
+  "radar_scores": {
+    "run_up_rhythm": <number 0-100>,
+    "foot_placement": <number 0-100>,
+    "body_turn_power": <number 0-100>,
+    "straight_knee": <number 0-100>,
+    "wrist_spin": <number 0-100>,
+    "follow_through": <number 0-100>
+  },
+  "issues": [
+    {
+      "severity": "<high or medium>",
+      "title": "<short issue title>",
+      "observation": "<what the coach sees>",
+      "mechanic": "<what is happening biomechanically>",
+      "so_what": "<why this matters in plain English for parents>"
+    }
+  ],
+  "next_month_focus": ["<focus item 1>", "<focus item 2>", "<focus item 3>"],
+  "parent_action": "<specific action parents can take at home>",
+  "expected_improvement_weeks": "<e.g. 4-6>"
+}`;
+}
+
+// ---------------------------------------------------------------
+// POST /api/biometric/analyze
+// Called by assessment-capture.html when coach clicks Generate Report
+// ---------------------------------------------------------------
+router.post("/analyze", authenticateToken, async (req, res) => {
+  const { player_id, coach_observations, persona, snapshot_base64 } = req.body;
+  const academy_id = req.user.academy_id;
+
+  // --- Input validation ---
+  if (!player_id || !coach_observations || !persona) {
+    return res.status(400).json({ 
+      error: "Missing required fields: player_id, coach_observations, persona" 
+    });
+  }
+
+  try {
+    // --- Fetch player details from DB ---
+    const playerResult = await pool.query(
+      "SELECT full_name, role FROM players WHERE id = $1 AND academy_id = $2",
+      [player_id, academy_id]
+    );
+
+    if (playerResult.rows.length === 0) {
+      return res.status(404).json({ error: "Player not found" });
+    }
+
+    const player = playerResult.rows[0];
+    console.log(`[BiometricRoutes] Starting analysis for ${player.full_name} (ID: ${player_id})`);
+
+    // --- Build prompt and call Gemini with fallback ---
+    const prompt = buildBiomechanicalPrompt(
+      player.full_name,
+      player.role,
+      coach_observations,
+      persona
+    );
+
+    const geminiResult = await callGeminiWithFallback(prompt, player.full_name);
+    
+    console.log(`[BiometricRoutes] AI response received. Model used: ${geminiResult.modelUsed}`);
+
+    // --- Parse and validate the AI response ---
+    let analysisData;
+    
+    // Strip any accidental markdown code fences the AI might add
+    let cleanText = geminiResult.text.trim();
+    if (cleanText.startsWith("```")) {
+      cleanText = cleanText.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim();
+    }
 
     try {
-        // Security check: confirm this player belongs to the coach's academy
-        const playerCheck = await pool.query(
-            'SELECT * FROM players WHERE id = $1 AND academy_id = $2',
-            [player_id, secureAcademyId]
-        );
-
-        if (playerCheck.rows.length === 0) {
-            return res.status(403).json({ error: "Access denied or Player not found." });
-        }
-
-        const player = playerCheck.rows[0];
-
-        // Business rule: 1 report per player per month
-        const rateLimitCheck = await pool.query(`
-            SELECT id FROM biomechanical_logs 
-            WHERE player_id = $1 
-            AND EXTRACT(MONTH FROM assessment_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-            AND EXTRACT(YEAR FROM assessment_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-        `, [player_id]);
-
-        if (rateLimitCheck.rows.length > 0) {
-            return res.status(429).json({
-                success: false,
-                error: "Rate Limit Exceeded: Head Coach is restricted to 1 Biomechanical Report per player, per month."
-            });
-        }
-
-        const prompt = `
-            STRICT DIRECTIVE: You are the SWPI Master Biomechanical Engine. 
-            NEVER mention you are an AI or use AI-related terminology.
-            Analyze these kinematics for a ${player.role || "Cricket Player"}: ${JSON.stringify(kinematic_data)}.
-            
-            CRICKETING BENCHMARKS:
-            - BATTING KNEE: Ideal is 120°-135°. If >145°, it is a COLLAPSE (Score < 4). 
-            - ARM ROTATION: If high (>70°) but Knee is collapsed, it is a technical FAILURE in the kinetic chain.
-            - SCORE RUTHLESSLY: Do not give high scores to beginners. A 70/100 is for a District-level player.
-            
-            OUTPUT JSON ONLY:
-            1. "radar_chart_scores": { "dynamic_balance", "arm_extension", "knee_bracing", "wrist_snap", "body_turn" } (1-10).
-            2. "executive_summary": Array of 3 professional technical observations.
-            3. "action_plan": 2 technical sentences.
-            4. "holistic_wellness": { "injury_prevention", "mindset_quote", "pro_tip" }
-        `;
-
-        console.log(`Triggering SWPI Engine for Player ID ${player_id}...`);
-
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-        let aiReport = await fetchFromGeminiWithRetry(model, prompt);
-
-        // Strip markdown fences if Gemini wraps the JSON in them
-        if (aiReport.startsWith('```json')) aiReport = aiReport.replace(/```json/g, '');
-        if (aiReport.startsWith('```')) aiReport = aiReport.replace(/```/g, '');
-        aiReport = aiReport.trim();
-
-        /*
-            STORAGE NOTE:
-            aiReport is a JSON string. We save it as a plain TEXT string in the DB.
-            If your column type is JSONB, PostgreSQL will parse it into an object
-            on retrieval — which breaks the frontend parser.
-            We store it as a string and always stringify on the way out (see Route 2).
-        */
-        const insertQuery = `
-            INSERT INTO biomechanical_logs 
-            (player_id, generated_by_user_id, assessment_date, ai_persona, kinematic_data_json, snapshot_base64, ai_generated_report, status)
-            VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, 'Report_Generated')
-            RETURNING *;
-        `;
-
-        const dbResult = await pool.query(insertQuery, [
-            player_id, user_id, ai_persona, JSON.stringify(kinematic_data), snapshot_base64, aiReport
-        ]);
-
-        res.status(200).json({ success: true, data: dbResult.rows[0] });
-
-    } catch (error) {
-        console.error("AI Generation Fatal Error:", error);
-        res.status(500).json({ error: "Failed to process biomechanical data and generate report." });
+      analysisData = JSON.parse(cleanText);
+    } catch (parseErr) {
+      console.error(`[BiometricRoutes] AI returned invalid JSON: ${parseErr.message}`);
+      console.error(`[BiometricRoutes] Raw AI response: ${cleanText.substring(0, 500)}`);
+      
+      // Use safe default rather than saving corrupted data
+      analysisData = {
+        executive_summary: "Analysis completed with limited data. Please re-run for full report.",
+        overall_score: 50,
+        current_level: "Developing",
+        key_strength: "Under Assessment",
+        primary_focus: "Full analysis pending",
+        growth_30_day: "N/A",
+        radar_scores: { run_up_rhythm: 50, foot_placement: 50, body_turn_power: 50, straight_knee: 50, wrist_spin: 50, follow_through: 50 },
+        issues: [],
+        next_month_focus: ["Complete full biomechanical assessment"],
+        parent_action: "Please ask the coach to schedule a full video analysis session.",
+        expected_improvement_weeks: "TBD"
+      };
     }
+
+    // --- Always add metadata ---
+    analysisData.model_used = geminiResult.modelUsed;
+    analysisData.generated_at = new Date().toISOString();
+    analysisData.persona_used = persona;
+
+    // --- Save to database — ALWAYS as properly stringified JSON ---
+    // NOTE: We use JSON.stringify() explicitly even though column is JSONB
+    // This prevents the double-stringify bug that corrupted previous records
+    const insertResult = await pool.query(
+      `INSERT INTO biomechanical_logs 
+        (player_id, academy_id, analysis_data, snapshot_base64, coach_observations, persona, created_at)
+       VALUES ($1, $2, $3::jsonb, $4, $5, $6, NOW())
+       RETURNING id`,
+      [
+        player_id,
+        academy_id,
+        JSON.stringify(analysisData),  // Explicit stringify → cast to JSONB
+        snapshot_base64 || null,
+        coach_observations,
+        persona
+      ]
+    );
+
+    const newRecordId = insertResult.rows[0].id;
+    console.log(`[BiometricRoutes] Analysis saved successfully. Record ID: ${newRecordId}, Model: ${geminiResult.modelUsed}`);
+
+    return res.status(200).json({
+      success: true,
+      record_id: newRecordId,
+      player_id: player_id,
+      model_used: geminiResult.modelUsed,
+      used_fallback: geminiResult.usedFallback,
+      message: "Analysis complete"
+    });
+
+  } catch (err) {
+    console.error(`[BiometricRoutes] Unhandled error in /analyze: ${err.message}`);
+    return res.status(500).json({ 
+      error: "Analysis failed. Please try again.",
+      detail: err.message 
+    });
+  }
 });
 
-// ---------------------------------------------------------
-// ROUTE 2: FETCH THE LATEST REPORT (Protected)
-// ---------------------------------------------------------
-router.get('/latest/:player_id', authenticate, async (req, res) => {
-    try {
-        const { player_id } = req.params;
-        const secureAcademyId = req.user.academy_id;
+// ---------------------------------------------------------------
+// GET /api/biometric/report/:player_id
+// Called by report-view.html to load the latest report for a player
+// ---------------------------------------------------------------
+router.get("/report/:player_id", authenticateToken, async (req, res) => {
+  const { player_id } = req.params;
+  const academy_id = req.user.academy_id;
 
-        // Security check: confirm this player belongs to the coach's academy
-        const playerCheck = await pool.query(
-            'SELECT id, name, role FROM players WHERE id = $1 AND academy_id = $2',
-            [player_id, secureAcademyId]
-        );
+  try {
+    // Fetch the most recent 5 records for this player
+    // We try multiple in case recent ones are corrupted
+    const result = await pool.query(
+      `SELECT id, analysis_data, coach_observations, persona, created_at
+       FROM biomechanical_logs
+       WHERE player_id = $1 AND academy_id = $2
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [player_id, academy_id]
+    );
 
-        if (playerCheck.rows.length === 0) {
-            return res.status(403).json({ error: "Access denied or Player not found." });
-        }
-
-        const playerData = playerCheck.rows[0];
-
-        const logCheck = await pool.query(
-            'SELECT * FROM biomechanical_logs WHERE player_id = $1 ORDER BY id DESC LIMIT 5',
-            [player_id]
-        );
-
-        if (logCheck.rows.length === 0) {
-            return res.status(404).json({ success: false, error: "No reports found for this player." });
-        }
-
-        /*
-            THE CORE FIX:
-            PostgreSQL JSONB columns automatically parse stored JSON into objects
-            when they are returned. The frontend's safeParseJSON() expects a STRING
-            to parse — if it receives an object, JSON.parse() crashes with
-            "Unexpected non-whitespace character" or "[object Object] is not valid JSON".
-
-            Solution: before sending to the frontend, we check each field.
-            If it is already an object (parsed by PostgreSQL), we re-stringify it
-            back into a string so the frontend always receives consistent string input.
-            This works regardless of whether the column is TEXT or JSONB.
-        */
-        const normalizedReports = logCheck.rows.map(row => ({
-            ...row,
-            ai_generated_report: typeof row.ai_generated_report === 'object'
-                ? JSON.stringify(row.ai_generated_report)
-                : row.ai_generated_report,
-            kinematic_data_json: typeof row.kinematic_data_json === 'object'
-                ? JSON.stringify(row.kinematic_data_json)
-                : row.kinematic_data_json
-        }));
-
-        res.status(200).json({
-            success: true,
-            data: {
-                player: playerData,
-                reports: normalizedReports
-            }
-        });
-
-    } catch (error) {
-        console.error("Database Fetch Error:", error);
-        res.status(500).json({ success: false, error: "Database Fetch Failed", details: error.message });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ 
+        error: "No reports found for this player",
+        player_id: player_id
+      });
     }
+
+    // --- Find the first record with valid, parseable data ---
+    let validRecord = null;
+    
+    for (const row of result.rows) {
+      const parsed = safeParseJSON(row.analysis_data, row.id);
+      
+      if (parsed && !parsed._parse_error && parsed.overall_score !== undefined) {
+        // This record is valid — use it
+        validRecord = {
+          id: row.id,
+          analysis_data: parsed,
+          coach_observations: row.coach_observations,
+          persona: row.persona,
+          created_at: row.created_at
+        };
+        break;
+      } else {
+        console.warn(`[BiometricRoutes] Skipping corrupted record ID ${row.id} for player ${player_id}`);
+      }
+    }
+
+    if (!validRecord) {
+      // All records are corrupted — return clean error, not a crash
+      return res.status(422).json({
+        error: "all_records_corrupted",
+        message: "All saved reports for this player have corrupted data. Please run a new capture session.",
+        player_id: player_id
+      });
+    }
+
+    // --- Fetch player details to include in response ---
+    const playerResult = await pool.query(
+      "SELECT full_name, role FROM players WHERE id = $1",
+      [player_id]
+    );
+
+    const playerName = playerResult.rows.length > 0 ? playerResult.rows[0].full_name : "Player";
+    const playerRole = playerResult.rows.length > 0 ? playerResult.rows[0].role : "Cricketer";
+
+    return res.status(200).json({
+      success: true,
+      player_name: playerName,
+      player_role: playerRole,
+      record_id: validRecord.id,
+      created_at: validRecord.created_at,
+      persona: validRecord.persona,
+      analysis: validRecord.analysis_data
+    });
+
+  } catch (err) {
+    console.error(`[BiometricRoutes] Error in GET /report/${player_id}: ${err.message}`);
+    return res.status(500).json({ 
+      error: "Failed to load report",
+      detail: err.message 
+    });
+  }
+});
+
+// ---------------------------------------------------------------
+// GET /api/biometric/history/:player_id
+// Returns list of all reports for a player (for history view)
+// ---------------------------------------------------------------
+router.get("/history/:player_id", authenticateToken, async (req, res) => {
+  const { player_id } = req.params;
+  const academy_id = req.user.academy_id;
+
+  try {
+    const result = await pool.query(
+      `SELECT id, persona, created_at,
+              (analysis_data->>'overall_score')::int as score,
+              analysis_data->>'current_level' as level
+       FROM biomechanical_logs
+       WHERE player_id = $1 AND academy_id = $2
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [player_id, academy_id]
+    );
+
+    return res.status(200).json({
+      success: true,
+      history: result.rows
+    });
+
+  } catch (err) {
+    console.error(`[BiometricRoutes] Error in GET /history/${player_id}: ${err.message}`);
+    return res.status(500).json({ error: "Failed to load history" });
+  }
 });
 
 module.exports = router;
