@@ -1,30 +1,24 @@
 // =============================================================
-// geminiService.js
-// LOCATION: Place this file at your ROOT backend folder
-// Same level as your routes/ and middleware/ folders
-// NOT inside routes/ or middleware/
+// geminiService.js — SWPI Gemini Fallback Chain
+// LOCATION: root of CRICKET-MVP-BACKEND (same level as server.js)
 // =============================================================
 //
 // COMMIT MESSAGE:
-// feat: add geminiService.js — Gemini 2.5 Flash to 1.5 Flash 
-// fallback chain, prevents 503 failures silently
+// fix: geminiService.js — update Gemini model names to correct
+// working API versions, fixes 404 model not found errors
 //
-// HOW IT WORKS (plain English):
-// Think of this as a smart taxi dispatcher.
-// 1. Always tries Gemini 2.5 Flash first (best quality)
-// 2. If 2.5 Flash is busy (503), auto-switches to 1.5 Flash
-// 3. If both fail, returns a safe default so app never crashes
-// Coach never sees an error. Report always generates.
 // =============================================================
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-const MODEL_PRIMARY   = "gemini-2.5-flash-preview-05-20";
-const MODEL_SECONDARY = "gemini-1.5-flash";
-const MAX_RETRIES     = 3;
-const BASE_DELAY_MS   = 1500;
+// FIXED model names — these are the correct working API identifiers
+const MODEL_PRIMARY   = "gemini-1.5-pro";    // Best quality, stable
+const MODEL_SECONDARY = "gemini-1.5-flash";   // Fast fallback
+
+const MAX_RETRIES   = 3;
+const BASE_DELAY_MS = 1500;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -60,6 +54,7 @@ async function callModelWithRetry(modelName, prompt, maxRetries) {
         console.warn(`[GeminiService] ${modelName} busy. Waiting ${waitMs}ms...`);
         await sleep(waitMs);
       } else {
+        // Non-retryable error — throw immediately
         console.error(`[GeminiService] Non-retryable error on ${modelName}: ${err.message}`);
         throw err;
       }
@@ -68,7 +63,7 @@ async function callModelWithRetry(modelName, prompt, maxRetries) {
 }
 
 function buildSafeDefaultReport() {
-  return {
+  return JSON.stringify({
     executive_summary: "AI analysis is temporarily unavailable. Please re-run the analysis session.",
     overall_score: 50,
     current_level: "Analysis Pending",
@@ -82,7 +77,7 @@ function buildSafeDefaultReport() {
     issues: [{
       severity: "info",
       title: "Analysis Pending",
-      observation: "The AI engine was temporarily unavailable during this session.",
+      observation: "The AI engine was temporarily unavailable.",
       mechanic: "Please run a new capture session.",
       so_what: "No data lost. Return to Video Analysis and run again."
     }],
@@ -91,7 +86,7 @@ function buildSafeDefaultReport() {
     expected_improvement_weeks: "TBD",
     model_used: "safe_default",
     generated_at: new Date().toISOString()
-  };
+  });
 }
 
 async function callGeminiWithFallback(prompt) {
@@ -111,9 +106,9 @@ async function callGeminiWithFallback(prompt) {
     console.error(`[GeminiService] ALL models failed. Returning safe default.`);
   }
 
-  // Step 3: Both failed — safe default, app never crashes
+  // Step 3: Safe default — app never crashes
   return {
-    text: JSON.stringify(buildSafeDefaultReport()),
+    text: buildSafeDefaultReport(),
     modelUsed: "safe_default",
     usedFallback: true,
     isDefault: true
