@@ -1,117 +1,246 @@
 // =============================================================
-// geminiService.js
-// LOCATION: root of CRICKET-MVP-BACKEND (same level as server.js)
+// biometricRoutes.js
+// LOCATION: routes/biometricRoutes.js
 // =============================================================
 //
 // COMMIT MESSAGE:
-// fix: geminiService.js — use gemini-2.5-flash and gemini-2.0-flash,
-// confirmed working models from API key, fixes 404 model errors
+// fix: biometricRoutes.js — use buildPrompt from geminiService
+// so persona descriptions are always correct and centralised
 //
 // =============================================================
 
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const express  = require("express");
+const router   = express.Router();
+const pool     = require("../config/db");
+const { authenticate } = require("../middleware/authMiddleware");
+const { callGeminiWithFallback, buildPrompt } = require("../geminiService");
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// CONFIRMED working models from your API key (verified May 2026)
-const MODEL_PRIMARY   = "gemini-2.5-flash";   // Best quality — stable June 2025
-const MODEL_SECONDARY = "gemini-2.0-flash";   // Fast reliable fallback
-
-const MAX_RETRIES   = 3;
-const BASE_DELAY_MS = 1500;
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function callModelWithRetry(modelName, prompt, maxRetries) {
-  const model = genAI.getGenerativeModel({ model: modelName });
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+// ---------------------------------------------------------------
+// HELPER: Safely parse JSON without crashing
+// ---------------------------------------------------------------
+function safeParseJSON(value, recordId) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "object") return value;
+  if (typeof value === "string") {
     try {
-      console.log(`[GeminiService] Trying ${modelName} — Attempt ${attempt}/${maxRetries}`);
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
-      console.log(`[GeminiService] SUCCESS with ${modelName} on attempt ${attempt}`);
-      return text;
-
-    } catch (err) {
-      const is503 = err.message && (
-        err.message.includes("503") ||
-        err.message.includes("Service Unavailable") ||
-        err.message.includes("high demand") ||
-        err.message.includes("overloaded")
-      );
-      const isLast = attempt === maxRetries;
-
-      if (isLast) {
-        console.error(`[GeminiService] FAILED: ${modelName} exhausted all retries. Error: ${err.message}`);
-        throw err;
-      }
-
-      if (is503) {
-        const waitMs = BASE_DELAY_MS * Math.pow(2, attempt - 1);
-        console.warn(`[GeminiService] ${modelName} busy. Waiting ${waitMs}ms...`);
-        await sleep(waitMs);
-      } else {
-        console.error(`[GeminiService] Non-retryable error on ${modelName}: ${err.message}`);
-        throw err;
-      }
+      return JSON.parse(value);
+    } catch (e) {
+      console.error(`[BiometricRoutes] JSON parse failed for record ${recordId}: ${e.message}`);
+      return {
+        _parse_error: true,
+        executive_summary: "This report has corrupted data. Please run a new capture session.",
+        overall_score: 0,
+        current_level: "Data Error",
+        key_strength: "N/A",
+        primary_focus: "Re-run capture session",
+        growth_30_day: "N/A",
+        radar_scores: {
+          run_up_rhythm: 0, foot_placement: 0, body_turn_power: 0,
+          straight_knee: 0, wrist_spin: 0, follow_through: 0
+        },
+        issues: [],
+        next_month_focus: ["Re-run biomechanical capture session"],
+        parent_action: "Please ask the coach to run a new video analysis session.",
+        expected_improvement_weeks: "TBD"
+      };
     }
   }
+  return null;
 }
 
-function buildSafeDefaultReport() {
-  return JSON.stringify({
-    executive_summary: "AI analysis is temporarily unavailable. Please re-run the analysis session.",
-    overall_score: 50,
-    current_level: "Analysis Pending",
-    key_strength: "To be determined",
-    primary_focus: "Re-run capture session",
-    growth_30_day: "N/A",
-    radar_scores: {
-      run_up_rhythm: 50, foot_placement: 50, body_turn_power: 50,
-      straight_knee: 50, wrist_spin: 50, follow_through: 50
-    },
-    issues: [{
-      severity: "info",
-      title: "Analysis Pending",
-      observation: "The AI engine was temporarily unavailable.",
-      mechanic: "Please run a new capture session.",
-      so_what: "No data lost. Return to Video Analysis and run again."
-    }],
-    next_month_focus: ["Re-run biomechanical capture session"],
-    parent_action: "Please ask the coach to schedule a new video analysis session.",
-    expected_improvement_weeks: "TBD",
-    model_used: "safe_default",
-    generated_at: new Date().toISOString()
-  });
-}
+// ---------------------------------------------------------------
+// POST /api/v1/biometrics/analyze
+// ---------------------------------------------------------------
+router.post("/analyze", authenticate, async (req, res) => {
+  const { player_id, coach_observations, persona, snapshot_base64 } = req.body;
+  const user_id = req.user.id;
 
-async function callGeminiWithFallback(prompt) {
-  // Step 1: Try primary model — gemini-2.5-flash
-  try {
-    const text = await callModelWithRetry(MODEL_PRIMARY, prompt, MAX_RETRIES);
-    return { text, modelUsed: MODEL_PRIMARY, usedFallback: false };
-  } catch (primaryErr) {
-    console.warn(`[GeminiService] Primary model failed. Switching to fallback...`);
+  if (!player_id || !coach_observations || !persona) {
+    return res.status(400).json({
+      error: "Missing required fields: player_id, coach_observations, persona"
+    });
   }
 
-  // Step 2: Try fallback — gemini-2.0-flash
   try {
-    const text = await callModelWithRetry(MODEL_SECONDARY, prompt, MAX_RETRIES);
-    return { text, modelUsed: MODEL_SECONDARY, usedFallback: true };
-  } catch (secondaryErr) {
-    console.error(`[GeminiService] ALL models failed. Returning safe default.`);
+    // Fetch player — column is 'name' (confirmed from DB)
+    const playerResult = await pool.query(
+      "SELECT name, role FROM players WHERE id = $1",
+      [player_id]
+    );
+
+    if (playerResult.rows.length === 0) {
+      return res.status(404).json({ error: "Player not found" });
+    }
+
+    const player = playerResult.rows[0];
+    console.log(`[BiometricRoutes] Starting analysis for ${player.name} (ID: ${player_id})`);
+
+    // Use buildPrompt from geminiService — single source of truth for personas
+    const prompt = buildPrompt(player.name, player.role, coach_observations, persona);
+    const geminiResult = await callGeminiWithFallback(prompt);
+    console.log(`[BiometricRoutes] AI response received. Model: ${geminiResult.modelUsed}`);
+
+    // Parse AI response — strip accidental markdown fences
+    let analysisData;
+    let cleanText = geminiResult.text.trim();
+    if (cleanText.startsWith("```")) {
+      cleanText = cleanText.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim();
+    }
+
+    try {
+      analysisData = JSON.parse(cleanText);
+    } catch (parseErr) {
+      console.error(`[BiometricRoutes] AI returned invalid JSON. Using safe default.`);
+      analysisData = {
+        executive_summary: "Analysis completed. Please re-run for detailed report.",
+        overall_score: 50,
+        current_level: "Developing",
+        key_strength: "Under Assessment",
+        primary_focus: "Full analysis pending",
+        growth_30_day: "First Assessment",
+        radar_scores: {
+          run_up_rhythm: 50, foot_placement: 50, body_turn_power: 50,
+          straight_knee: 50, wrist_spin: 50, follow_through: 50
+        },
+        issues: [],
+        next_month_focus: ["Complete full biomechanical assessment"],
+        parent_action: "Please ask the coach to schedule a full video analysis session.",
+        expected_improvement_weeks: "TBD"
+      };
+    }
+
+    // Add metadata
+    analysisData.model_used   = geminiResult.modelUsed;
+    analysisData.generated_at = new Date().toISOString();
+    analysisData.persona_used = persona;
+
+    // Save using actual biomechanical_logs column names (confirmed from DB)
+    const insertResult = await pool.query(
+      `INSERT INTO biomechanical_logs
+        (player_id, generated_by_user_id, assessment_date,
+         kinematic_data_json, ai_generated_report, ai_persona,
+         snapshot_base64, status, created_at)
+       VALUES ($1, $2, CURRENT_DATE, $3::jsonb, $4, $5, $6, 'complete', NOW())
+       RETURNING id`,
+      [
+        player_id,
+        user_id,
+        JSON.stringify(analysisData),
+        analysisData.executive_summary,
+        persona,
+        snapshot_base64 || null
+      ]
+    );
+
+    const newRecordId = insertResult.rows[0].id;
+    console.log(`[BiometricRoutes] Saved. Record ID: ${newRecordId}, Model: ${geminiResult.modelUsed}`);
+
+    return res.status(200).json({
+      success: true,
+      record_id: newRecordId,
+      player_id,
+      model_used: geminiResult.modelUsed,
+      used_fallback: geminiResult.usedFallback,
+      message: "Analysis complete"
+    });
+
+  } catch (err) {
+    console.error(`[BiometricRoutes] Error in /analyze: ${err.message}`);
+    return res.status(500).json({
+      error: "Analysis failed. Please try again.",
+      detail: err.message
+    });
   }
+});
 
-  // Step 3: Safe default — app never crashes
-  return {
-    text: buildSafeDefaultReport(),
-    modelUsed: "safe_default",
-    usedFallback: true,
-    isDefault: true
-  };
-}
+// ---------------------------------------------------------------
+// GET /api/v1/biometrics/report/:player_id
+// ---------------------------------------------------------------
+router.get("/report/:player_id", authenticate, async (req, res) => {
+  const { player_id } = req.params;
 
-module.exports = { callGeminiWithFallback };
+  try {
+    const result = await pool.query(
+      `SELECT id, kinematic_data_json, ai_persona, created_at
+       FROM biomechanical_logs
+       WHERE player_id = $1
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [player_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "No reports found for this player", player_id });
+    }
+
+    // Find first valid non-corrupted record
+    let validRecord = null;
+    for (const row of result.rows) {
+      const parsed = safeParseJSON(row.kinematic_data_json, row.id);
+      if (parsed && !parsed._parse_error && parsed.overall_score !== undefined) {
+        validRecord = {
+          id: row.id,
+          analysis_data: parsed,
+          persona: row.ai_persona,
+          created_at: row.created_at
+        };
+        break;
+      }
+      console.warn(`[BiometricRoutes] Skipping corrupted record ID ${row.id}`);
+    }
+
+    if (!validRecord) {
+      return res.status(422).json({
+        error: "all_records_corrupted",
+        message: "All saved reports have corrupted data. Please run a new capture session.",
+        player_id
+      });
+    }
+
+    // Fetch player name
+    const playerResult = await pool.query(
+      "SELECT name, role FROM players WHERE id = $1",
+      [player_id]
+    );
+
+    return res.status(200).json({
+      success: true,
+      player_name: playerResult.rows[0]?.name || "Player",
+      player_role: playerResult.rows[0]?.role  || "Cricketer",
+      record_id:   validRecord.id,
+      created_at:  validRecord.created_at,
+      persona:     validRecord.persona,
+      analysis:    validRecord.analysis_data
+    });
+
+  } catch (err) {
+    console.error(`[BiometricRoutes] Error in GET /report/${player_id}: ${err.message}`);
+    return res.status(500).json({ error: "Failed to load report", detail: err.message });
+  }
+});
+
+// ---------------------------------------------------------------
+// GET /api/v1/biometrics/history/:player_id
+// ---------------------------------------------------------------
+router.get("/history/:player_id", authenticate, async (req, res) => {
+  const { player_id } = req.params;
+
+  try {
+    const result = await pool.query(
+      `SELECT id, ai_persona, created_at,
+              (kinematic_data_json->>'overall_score')::int as score,
+              kinematic_data_json->>'current_level' as level
+       FROM biomechanical_logs
+       WHERE player_id = $1
+       ORDER BY created_at DESC LIMIT 20`,
+      [player_id]
+    );
+    return res.status(200).json({ success: true, history: result.rows });
+
+  } catch (err) {
+    console.error(`[BiometricRoutes] Error in GET /history/${player_id}: ${err.message}`);
+    return res.status(500).json({ error: "Failed to load history" });
+  }
+});
+
+module.exports = router;
